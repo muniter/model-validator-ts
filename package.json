@@ -1,6 +1,6 @@
 {
   "name": "model-validator-ts",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "packageManager": "pnpm@9.10.0",
   "author": "muniter",
@@ -23,8 +23,8 @@
   "types": "./dist/src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
     }
   },
   "sideEffects": false,
