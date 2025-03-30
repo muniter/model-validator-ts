@@ -5,6 +5,8 @@
   "packageManager": "pnpm@9.10.0",
   "author": "muniter",
   "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/muniter/model-validator-ts.git"
@@ -20,11 +22,12 @@
     "prepublishOnly": "pnpm build"
   },
   "exports": {
-    ".": "./dist/src/index.js"
+    ".": "./dist/index.js"
   },
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "keywords": [
     "typescript",

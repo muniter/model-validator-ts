@@ -138,7 +138,7 @@ async function main() {
 
   // Publish to npm
   console.log('\nPublishing to npm...');
-  runCommand('npm publish');
+  runCommand('pnpm publish');
 
   // Push changes to git
   console.log('\nPushing changes to git...');
