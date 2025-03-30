@@ -29,8 +29,7 @@
   },
   "sideEffects": false,
   "files": [
-    "dist",
-    "src"
+    "dist"
   ],
   "keywords": [
     "typescript",
@@ -46,6 +45,7 @@
     "type-safe"
   ],
   "devDependencies": {
+    "@types/node": "^22.13.14",
     "typescript": "^5.8.2",
     "vitest": "^2.1.9",
     "zod": "^3.24.2"

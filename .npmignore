@@ -1,25 +1,41 @@
-# Source control
-.git
+# Source files (not needed in npm package)
+src/
+
+# Test files
+**/*.spec.ts
+**/*.test.ts
+**/*.spec.js
+**/*.test.js
+
+# Development scripts
+scripts/
+
+# Development config files
+.eslintrc*
+.prettierrc*
+.editorconfig
 .gitignore
+.npmignore
 
-# Dependencies
-node_modules
-.pnpm-store
+# TypeScript config
+tsconfig.json
+tsconfig.*.json
 
-# Build
-dist
+# Build output (we only want the dist directory)
+build/
 
-# Development
-.vscode
-.idea
+# Development dependencies
+node_modules/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
 *.log
-.DS_Store
-
-# Test
-coverage
-.vitest
-
-# Config files
-.eslintrc
-.prettierrc
-tsconfig.json 
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log* 
