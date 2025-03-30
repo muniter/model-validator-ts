@@ -1,0 +1,25 @@
+# Source control
+.git
+.gitignore
+
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build
+dist
+
+# Development
+.vscode
+.idea
+*.log
+.DS_Store
+
+# Test
+coverage
+.vitest
+
+# Config files
+.eslintrc
+.prettierrc
+tsconfig.json 

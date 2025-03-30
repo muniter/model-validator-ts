@@ -1,0 +1,56 @@
+{
+  "name": "model-validator-ts",
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@9.10.0",
+  "author": "muniter",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/muniter/model-validator-ts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/muniter/model-validator-ts/issues"
+  },
+  "homepage": "https://github.com/muniter/model-validator-ts#readme",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src"
+  ],
+  "keywords": [
+    "typescript",
+    "validation",
+    "zod",
+    "validator",
+    "standard-schema",
+    "business-rules",
+    "domain-driven-design",
+    "command",
+    "command-pattern",
+    "dependency-injection",
+    "type-safe"
+  ],
+  "dependencies": {
+    "@standard-schema/spec": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vitest": "^2.1.9",
+    "zod": "^3.24.2"
+  }
+}
