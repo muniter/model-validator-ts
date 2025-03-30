@@ -45,9 +45,6 @@
     "dependency-injection",
     "type-safe"
   ],
-  "dependencies": {
-    "@standard-schema/spec": "^1.0.0"
-  },
   "devDependencies": {
     "typescript": "^5.8.2",
     "vitest": "^2.1.9",

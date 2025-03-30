@@ -1,6 +1,8 @@
 # Model Validator TS
 
-A type-safe validation library for TypeScript that helps you validate data with complex business rules and dependencies.
+[![npm version](https://img.shields.io/npm/v/model-validator-ts.svg)](https://www.npmjs.com/package/model-validator-ts)
+
+🔒 A type-safe validation library for TypeScript that helps you validate data with complex business rules and dependencies 🚀
 
 ## Features
 
