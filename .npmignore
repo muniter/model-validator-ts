@@ -2,10 +2,8 @@
 src/
 
 # Test files
-**/*.spec.ts
-**/*.test.ts
-**/*.spec.js
-**/*.test.js
+*.spec.*
+quickstart.*
 
 # Development scripts
 scripts/
@@ -38,4 +36,8 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log* 
+pnpm-debug.log*
+
+# Test coverage
+coverage/
+.vitest/ 

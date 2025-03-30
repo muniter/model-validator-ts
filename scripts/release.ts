@@ -1,12 +1,25 @@
 import { execSync } from 'child_process';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { parseArgs } from 'node:util';
+import { createRequire } from 'node:module';
 
+const require = createRequire(import.meta.url);
 const packageJsonPath = join(process.cwd(), 'package.json');
 
 function getCurrentVersion(): string {
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
   return packageJson.version;
+}
+
+function getLatestNpmVersion(packageName: string): string {
+  try {
+    const result = execSync(`npm view ${packageName} version`, { encoding: 'utf-8' });
+    return result.trim();
+  } catch (error) {
+    console.log('No previous version found on npm, using current version as base');
+    return getCurrentVersion();
+  }
 }
 
 function updateVersion(version: string, type: 'patch' | 'minor' | 'major'): string {
@@ -40,28 +53,69 @@ function runCommand(command: string) {
   }
 }
 
-function main() {
-  const type = process.argv[2] as 'patch' | 'minor' | 'major';
+function askForConfirmation(message: string): Promise<boolean> {
+  const readline = require('readline').createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise<boolean>((resolve) => {
+    readline.question(`${message} (y/N): `, (answer: string) => {
+      readline.close();
+      resolve(answer.toLowerCase() === 'y');
+    });
+  });
+}
+
+async function main() {
+  // Parse command line arguments
+  const { values } = parseArgs({
+    options: {
+      type: {
+        type: 'string',
+        short: 't',
+        default: 'patch'
+      },
+      force: {
+        type: 'boolean',
+        short: 'f',
+        default: false
+      }
+    }
+  });
+
+  const type = values.type as 'patch' | 'minor' | 'major';
   
-  if (!type || !['patch', 'minor', 'major'].includes(type)) {
-    console.error('Please specify version type: patch, minor, or major');
+  if (!['patch', 'minor', 'major'].includes(type)) {
+    console.error('Please specify a valid version type: patch, minor, or major');
     process.exit(1);
   }
 
-  // Get current version and calculate new version
+  // Get current and latest versions
   const currentVersion = getCurrentVersion();
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+  const latestNpmVersion = getLatestNpmVersion(packageJson.name);
   const newVersion = updateVersion(currentVersion, type);
-  
-  console.log(`Current version: ${currentVersion}`);
-  console.log(`New version: ${newVersion}`);
 
   // Run tests
   console.log('\nRunning tests...');
-  runCommand('pnpm test');
+  runCommand('pnpm test -- --run');
 
-  // Build the package
-  console.log('\nBuilding package...');
-  runCommand('pnpm build');
+  // Run lint
+  console.log('\nRunning lint...');
+  runCommand('pnpm lint');
+
+  
+  console.log(`Current version: ${currentVersion}`);
+  console.log(`Latest npm version: ${latestNpmVersion}`);
+  console.log(`New version will be: ${newVersion}`);
+  if (!values.force) {
+    const shouldProceed = await askForConfirmation('Do you want to proceed with this version?');
+    if (!shouldProceed) {
+      console.log('Release cancelled');
+      process.exit(0);
+    }
+  }
 
   // Update version in package.json
   console.log('\nUpdating version...');
@@ -72,6 +126,15 @@ function main() {
   runCommand(`git add package.json`);
   runCommand(`git commit -m "chore: release v${newVersion}"`);
   runCommand(`git tag -a v${newVersion} -m "Release v${newVersion}"`);
+
+  // Ask for confirmation before publishing
+  if (!values.force) {
+    const shouldPublish = await askForConfirmation('Do you want to publish to npm?');
+    if (!shouldPublish) {
+      console.log('Publishing cancelled');
+      process.exit(0);
+    }
+  }
 
   // Publish to npm
   console.log('\nPublishing to npm...');
@@ -85,4 +148,7 @@ function main() {
   console.log('\nRelease completed successfully! 🎉');
 }
 
-main(); 
+main().catch(error => {
+  console.error('Release failed:', error);
+  process.exit(1);
+}); 
