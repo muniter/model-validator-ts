@@ -2,125 +2,371 @@ import { test, expect, describe, assert } from "vitest";
 import { z } from "zod";
 import { createValidator } from "./index.js";
 
-const layerRepository = {
-  getLayer: async (
-    id: string
-  ): Promise<{ name: string; classification?: string } | null> => {
-    if (id === "layer-1") {
-      return { name: "Layer 1" };
+const userRepository = {
+  findUserByEmail: async (email: string): Promise<{ id: string; email: string } | null> => {
+    // Simulate existing users
+    if (email === "existing@example.com") {
+      return { id: "user-123", email };
     }
     return null;
   },
+  isEmailBlacklisted: async (email: string): Promise<boolean> => {
+    // Simulate blacklisted domains/emails
+    const blacklistedDomains = ["spam.com", "blocked.net"];
+    const blacklistedEmails = ["admin@badactor.com"];
+    
+    if (blacklistedEmails.includes(email)) return true;
+    
+    const domain = email.split("@")[1];
+    if (!domain) return false;
+    return blacklistedDomains.includes(domain);
+  },
+  createUser: async (userData: { email: string; name: string; age: number }) => {
+    return {
+      id: `user-${Date.now()}`,
+      ...userData,
+      createdAt: new Date().toISOString()
+    };
+  }
 };
-type LayerRepository = typeof layerRepository;
+type UserRepository = typeof userRepository;
+
 
 describe("Fluent Validator methods", () => {
-  const testSchema = z.object({ name: z.string() });
+  const userRegistrationSchema = z.object({ 
+    email: z.string().email(),
+    name: z.string().min(2),
+    age: z.number().min(18)
+  });
+  
   test("Validator with no deps can be called with validate", async () => {
-    const validator = createValidator().input(testSchema);
+    const validator = createValidator().input(userRegistrationSchema);
 
     expect(validator["~unsafeInternals"]).toMatchObject({
       contextRules: expect.any(Array),
-      schema: testSchema,
+      schema: userRegistrationSchema,
       deps: undefined,
       depsStatus: "not-required",
     });
 
-    const result = await validator.validate({ name: "John" });
+    const result = await validator.validate({ 
+      email: "john@example.com", 
+      name: "John Doe", 
+      age: 25 
+    });
     assert(result.success);
-    expect(result.value).toEqual({ name: "John" });
+    expect(result.value).toEqual({ 
+      email: "john@example.com", 
+      name: "John Doe", 
+      age: 25 
+    });
   });
 
   test("Validator with deps can only be called after providing deps", async () => {
-    const validator = createValidator().input(testSchema).$deps<{
-      layerRepository: {
-        getLayer: (id: string) => Promise<{ name: string } | null>;
-      };
+    const validator = createValidator().input(userRegistrationSchema).$deps<{
+      userRepository: UserRepository;
     }>();
 
     expect(validator["~unsafeInternals"]).toMatchObject({
-      schema: testSchema,
+      schema: userRegistrationSchema,
       deps: undefined,
       depsStatus: "required",
     });
 
     expect(
       // @ts-expect-error - validate method should not be available when deps are required
-      () => validator.validate({ name: "John" })
+      () => validator.validate({ email: "john@example.com", name: "John Doe", age: 25 })
     ).toThrow("Deps should be provided before calling validate");
   });
 
   test("Validator with deps can be called after providing deps", async () => {
-    const validator = createValidator().input(testSchema).$deps<{
-      layerRepository: {
-        getLayer: (id: string) => Promise<{ name: string } | null>;
-      };
+    const validator = createValidator().input(userRegistrationSchema).$deps<{
+      userRepository: UserRepository;
     }>();
 
     expect(validator["~unsafeInternals"]).toMatchObject({
-      schema: testSchema,
+      schema: userRegistrationSchema,
       deps: undefined,
       depsStatus: "required",
     });
 
-    const deps = { layerRepository };
+    const deps = { userRepository };
     const validatorWithDeps = validator.provide(deps);
 
     expect(validatorWithDeps["~unsafeInternals"]).toMatchObject({
-      schema: testSchema,
+      schema: userRegistrationSchema,
       deps,
       depsStatus: "passed",
     });
 
-    const result = await validatorWithDeps.validate({ name: "John" });
+    const result = await validatorWithDeps.validate({ 
+      email: "john@example.com", 
+      name: "John Doe", 
+      age: 25 
+    });
     assert(result.success);
-    expect(result.value).toEqual({ name: "John" });
+    expect(result.value).toEqual({ 
+      email: "john@example.com", 
+      name: "John Doe", 
+      age: 25 
+    });
   });
 
   test("Command can only be called directly if no deps are required", async () => {
-    const validator = createValidator().input(testSchema);
+    const validator = createValidator().input(userRegistrationSchema);
 
     expect(validator["~unsafeInternals"]).toMatchObject({
-      schema: testSchema,
+      schema: userRegistrationSchema,
       deps: undefined,
       depsStatus: "not-required",
     });
 
     const command = validator.command({
       execute: async (args) => {
-        return args.data.name;
+        return { userId: "user-123", ...args.data };
       },
     });
 
-    const result = await command.run({ name: "John" });
+    const result = await command.run({ 
+      email: "john@example.com", 
+      name: "John Doe", 
+      age: 25 
+    });
     assert(result.success);
-    expect(result.result).toEqual("John");
+    expect(result.result).toEqual({ 
+      userId: "user-123",
+      email: "john@example.com", 
+      name: "John Doe", 
+      age: 25 
+    });
   });
 
   test("Command can be called after providing deps", async () => {
-    const validator = createValidator().input(testSchema).$deps<{
-      layerRepository: {
-        getLayer: (id: string) => Promise<{ name: string } | null>;
-      };
+    const validator = createValidator().input(userRegistrationSchema).$deps<{
+      userRepository: UserRepository;
     }>();
 
     expect(validator["~unsafeInternals"]).toMatchObject({
-      schema: testSchema,
+      schema: userRegistrationSchema,
       deps: undefined,
       depsStatus: "required",
     });
 
     const command = validator.command({
       execute: async (args) => {
-        return args.data.name;
+        return await args.deps.userRepository.createUser(args.data);
       },
     });
 
     const result = await command
-      .provide({ layerRepository })
-      .run({ name: "John" });
+      .provide({ userRepository })
+      .run({ email: "john@example.com", name: "John Doe", age: 25 });
     assert(result.success);
-    expect(result.result).toEqual("John");
+    expect(result.result).toMatchObject({
+      id: expect.stringMatching(/^user-\d+$/),
+      email: "john@example.com",
+      name: "John Doe", 
+      age: 25,
+      createdAt: expect.any(String)
+    });
+  });
+});
+
+describe("User Registration Validation", () => {
+  const userRegistrationSchema = z.object({ 
+    email: z.string().email(),
+    name: z.string().min(2),
+    age: z.number().min(18)
+  });
+
+  test("should detect duplicate email during validation", async () => {
+    const userRegistrationValidator = createValidator()
+      .input(userRegistrationSchema)
+      .$deps<{ userRepository: UserRepository }>()
+      .addRule({
+        description: "Check for duplicate email",
+        fn: async (args) => {
+          const existingUser = await args.deps.userRepository.findUserByEmail(args.data.email);
+          if (existingUser) {
+            args.bag.addError("email", "Email already exists");
+          }
+        },
+      })
+      .provide({ userRepository });
+
+    // Test with existing email
+    const result1 = await userRegistrationValidator.validate({
+      email: "existing@example.com",
+      name: "John Doe",
+      age: 25
+    });
+
+    assert(!result1.success);
+    expect(result1.errors.firstError("email")).toBe("Email already exists");
+
+    // Test with new email
+    const result2 = await userRegistrationValidator.validate({
+      email: "new@example.com",
+      name: "Jane Doe",
+      age: 30
+    });
+
+    assert(result2.success);
+    expect(result2.value.email).toBe("new@example.com");
+  });
+
+  test("should detect blacklisted email during validation", async () => {
+    const userRegistrationValidator = createValidator()
+      .input(userRegistrationSchema)
+      .$deps<{ userRepository: UserRepository }>()
+      .addRule({
+        description: "Check for blacklisted email",
+        fn: async (args) => {
+          const isBlacklisted = await args.deps.userRepository.isEmailBlacklisted(args.data.email);
+          if (isBlacklisted) {
+            args.bag.addError("email", "Email domain is not allowed");
+          }
+        },
+      })
+      .provide({ userRepository });
+
+    // Test with blacklisted domain
+    const result1 = await userRegistrationValidator.validate({
+      email: "user@spam.com",
+      name: "John Doe",
+      age: 25
+    });
+
+    assert(!result1.success);
+    expect(result1.errors.firstError("email")).toBe("Email domain is not allowed");
+
+    // Test with blacklisted specific email
+    const result2 = await userRegistrationValidator.validate({
+      email: "admin@badactor.com",
+      name: "Jane Doe",
+      age: 30
+    });
+
+    assert(!result2.success);
+    expect(result2.errors.firstError("email")).toBe("Email domain is not allowed");
+
+    // Test with allowed email
+    const result3 = await userRegistrationValidator.validate({
+      email: "user@gooddomain.com",
+      name: "Bob Smith",
+      age: 28
+    });
+
+    assert(result3.success);
+    expect(result3.value.email).toBe("user@gooddomain.com");
+  });
+
+  test("should run all validation rules and combine errors", async () => {
+    const userRegistrationValidator = createValidator()
+      .input(userRegistrationSchema)
+      .$deps<{ userRepository: UserRepository }>()
+      .addRule({
+        description: "Check for duplicate email",
+        fn: async (args) => {
+          const existingUser = await args.deps.userRepository.findUserByEmail(args.data.email);
+          if (existingUser) {
+            args.bag.addError("email", "Email already exists");
+          }
+        },
+      })
+      .addRule({
+        description: "Check for blacklisted email",
+        fn: async (args) => {
+          const isBlacklisted = await args.deps.userRepository.isEmailBlacklisted(args.data.email);
+          if (isBlacklisted) {
+            args.bag.addError("email", "Email domain is not allowed");
+          }
+        },
+      })
+      .provide({ userRepository });
+
+    // Test with existing blacklisted email - should get both errors
+    const result = await userRegistrationValidator.validate({
+      email: "existing@example.com", // This email exists in our mock
+      name: "John Doe",
+      age: 25
+    });
+
+    assert(!result.success);
+    expect(result.errors.firstError("email")).toBe("Email already exists");
+  });
+
+  test("user registration command with full validation", async () => {
+    const userRegistrationCommand = createValidator()
+      .input(userRegistrationSchema)
+      .$deps<{ userRepository: UserRepository }>()
+      .addRule({
+        description: "Check for duplicate email",
+        fn: async (args) => {
+          const existingUser = await args.deps.userRepository.findUserByEmail(args.data.email);
+          if (existingUser) {
+            args.bag.addError("email", "Email already exists");
+          }
+        },
+      })
+      .addRule({
+        description: "Check for blacklisted email",
+        fn: async (args) => {
+          const isBlacklisted = await args.deps.userRepository.isEmailBlacklisted(args.data.email);
+          if (isBlacklisted) {
+            args.bag.addError("email", "Email domain is not allowed");
+          }
+        },
+      })
+      .command({
+        execute: async (args) => {
+          return await args.deps.userRepository.createUser(args.data);
+        },
+      });
+
+    // Test successful registration
+    const result1 = await userRegistrationCommand
+      .provide({ userRepository })
+      .run({
+        email: "success@example.com",
+        name: "John Doe",
+        age: 25
+      });
+
+    assert(result1.success);
+    expect(result1.result).toMatchObject({
+      id: expect.stringMatching(/^user-\d+$/),
+      email: "success@example.com",
+      name: "John Doe",
+      age: 25,
+      createdAt: expect.any(String)
+    });
+
+    // Test failed registration due to duplicate email
+    const result2 = await userRegistrationCommand
+      .provide({ userRepository })
+      .run({
+        email: "existing@example.com",
+        name: "Jane Doe",
+        age: 30
+      });
+
+    assert(!result2.success);
+    expect(result2.step).toBe("validation");
+    expect(result2.errors.firstError("email")).toBe("Email already exists");
+
+    // Test failed registration due to blacklisted email
+    const result3 = await userRegistrationCommand
+      .provide({ userRepository })
+      .run({
+        email: "bad@spam.com",
+        name: "Bob Smith",
+        age: 28
+      });
+
+    assert(!result3.success);
+    expect(result3.step).toBe("validation");
+    expect(result3.errors.firstError("email")).toBe("Email domain is not allowed");
   });
 });
 
@@ -144,74 +390,68 @@ describe("Fluent Validator object creation efficiency", () => {
 
 describe("Fluent Validator with Context", () => {
   test("can pass context between rules", async () => {
-    const updateLayerVisibilitySchema = z.object({
-      layerId: z.string(),
-      visibility: z.enum(["public", "private"]),
+    const updateEmailSchema = z.object({
+      userId: z.string(),
+      newEmail: z.string().email(),
     });
 
-    const upateLayerValidatorDefinition = createValidator()
-      .input(updateLayerVisibilitySchema)
+    const updateEmailValidatorDefinition = createValidator()
+      .input(updateEmailSchema)
       .$deps<{
-        layerRepository: LayerRepository;
+        userRepository: UserRepository;
       }>()
       .addRule({
+        description: "Check if new email is already taken",
         fn: async (args) => {
-          const layer = await args.deps.layerRepository.getLayer(
-            args.data.layerId
-          );
-          if (!layer) {
-            return args.bag.addError("layerId", "Layer not found");
+          const existingUser = await args.deps.userRepository.findUserByEmail(args.data.newEmail);
+          if (existingUser && existingUser.id !== args.data.userId) {
+            return args.bag.addError("newEmail", "Email already taken by another user");
           }
-          return { context: { layer } };
+          return { context: { existingUser } };
+        },
+      })
+      .addRule({
+        description: "Check if new email is blacklisted",
+        fn: async (args) => {
+          expect(args.context).toBeDefined();
+          const isBlacklisted = await args.deps.userRepository.isEmailBlacklisted(args.data.newEmail);
+          if (isBlacklisted) {
+            return args.bag.addError("newEmail", "Email domain is not allowed");
+          }
+          return { context: { validationToken: "abc123" } };
         },
       })
       .addRule({
         fn: async (args) => {
           expect(args.context).toBeDefined();
-          const layer = args.context.layer;
-          if (
-            layer.classification === "confidential" &&
-            args.data.visibility === "public"
-          ) {
-            args.bag.addError(
-              "visibility",
-              "Layers with confidential classification cannot be public visibility"
-            );
-          }
-
-          return { context: { secret: "123" } };
-        },
-      })
-      .addRule({
-        fn: async (args) => {
-          expect(args.context).toBeDefined();
-          const secret = args.context.secret;
-          const layer = args.context.layer;
+          const validationToken = args.context.validationToken;
+          const existingUser = args.context.existingUser;
 
           expect({
-            secret,
-            layer,
+            validationToken,
+            existingUser,
           }).toMatchObject({
-            layer: expect.objectContaining({
-              name: expect.any(String),
-            }),
-            secret: "123",
+            existingUser: args.data.newEmail === "existing@example.com" 
+              ? expect.objectContaining({
+                  id: expect.any(String),
+                  email: expect.any(String),
+                })
+              : null,
+            validationToken: "abc123",
           } as const);
         },
       })
-      .provide({ layerRepository });
+      .provide({ userRepository });
 
     const input = {
-      layerId: "layer-1",
-      visibility: "public",
+      userId: "user-456",
+      newEmail: "newemail@example.com",
     };
-    const result = await upateLayerValidatorDefinition.validate(input);
+    const result = await updateEmailValidatorDefinition.validate(input);
     assert(result.success);
     expect(result.context).toMatchObject({
-      layer: expect.objectContaining({
-        name: expect.any(String),
-      }),
-      secret: "123",
+      existingUser: null,
+      validationToken: "abc123",
     });
     expect(result.value).toEqual(input);
   });
@@ -223,34 +463,36 @@ describe("Fluent Validator with Context", () => {
       amount: z.number().positive(),
     });
 
-    // Mock database service
-    const mockDb = {
-      executeTransaction: async (fn: () => Promise<any>) => {
-        try {
-          return await fn();
-        } catch (error) {
-          throw error;
-        }
+    // Mock external bank service
+    const externalBankService = {
+      checkAccountBalance: async (account: string): Promise<number> => {
+        if (account === "insufficient-funds") return 50; // Less than transfer amount
+        return 1000; // Sufficient funds
       },
-      debit: async (account: string, amount: number) => {
-        if (account === "insufficient-funds") {
-          throw new Error("Insufficient funds");
-        }
-        if (account === "locked-account") {
-          throw new Error("Account is locked");
-        }
+      validateAccountStatus: async (account: string): Promise<boolean> => {
+        if (account === "closed-account") throw new Error("Account is closed");
+        if (account === "suspended-account") throw new Error("Account is suspended");
+        if (account === "frozen-account") throw new Error("Account is frozen");
+        return true;
       },
-      credit: async (account: string, amount: number) => {
-        if (account === "closed-account") {
-          throw new Error("Cannot credit closed account");
-        }
+      executeTransfer: async (from: string, to: string, amount: number) => {
+        if (from === "fails-in-transfer") throw new Error("Failed in transfer");
+        // This would make the actual API call to the bank
+        return {
+          transactionId: `ext-txn-${Date.now()}`,
+          status: "completed",
+          from,
+          to,
+          amount,
+        };
       },
     };
 
     const transferCommand = createValidator()
       .input(transferMoneySchema)
-      .$deps<{ db: typeof mockDb }>()
+      .$deps<{ externalBankService: typeof externalBankService }>()
       .addRule({
+        description: "Validate no transfer to same account",
         fn: async (args) => {
           // Business rule: Cannot transfer to same account
           if (args.data.fromAccount === args.data.toAccount) {
@@ -258,35 +500,64 @@ describe("Fluent Validator with Context", () => {
           }
         },
       })
+      .addRule({
+        description: "Validate account status",
+        fn: async (args) => {
+          // Validate account status
+          await args.deps.externalBankService
+            .validateAccountStatus(args.data.fromAccount)
+            .catch((error) => {
+              args.bag.addError(
+                "fromAccount",
+                "Account is not in a valid state to transfer"
+              );
+            });
+          await args.deps.externalBankService
+            .validateAccountStatus(args.data.toAccount)
+            .catch((error) => {
+              args.bag.addError(
+                "toAccount",
+                "Account is not in a valid state to transfer"
+              );
+            });
+        },
+      })
+      .addRule({
+        description: "Check if from account has sufficient balance",
+        fn: async (args) => {
+          const fromBalance =
+            await args.deps.externalBankService.checkAccountBalance(
+              args.data.fromAccount
+            );
+          if (fromBalance < args.data.amount) {
+            args.bag.addError("amount", "Insufficient funds");
+          }
+        },
+      })
       .command({
         execute: async (args) => {
           try {
-            // All validation passed, execute the transaction
-            await args.deps.db.executeTransaction(async () => {
-              await args.deps.db.debit(args.data.fromAccount, args.data.amount);
-              await args.deps.db.credit(args.data.toAccount, args.data.amount);
-            });
-
-            return {
-              transactionId: `txn-${Date.now()}`,
-              status: "completed",
-              ...args.data,
-            };
+            // Execute the external transfer
+            const result = await args.deps.externalBankService.executeTransfer(
+              args.data.fromAccount,
+              args.data.toAccount,
+              args.data.amount
+            );
+            return result;
           } catch (error) {
-            // Transaction failed - report the error
-            if (error instanceof Error) {
-              args.bag.addError(
-                "global",
-                `Transaction failed: ${error.message}`
-              );
-            }
-            return args.bag;
+            // External service failed unexpectedly
+            return args.bag.addError(
+              "global",
+              `External service error: ${
+                error instanceof Error ? error.message : "Unknown error"
+              }`
+            );
           }
         },
       });
 
     // Test validation failure (business rule violation) - step should be "validation"
-    const result1 = await transferCommand.provide({ db: mockDb }).run({
+    const result1 = await transferCommand.provide({ externalBankService }).run({
       fromAccount: "account-123",
       toAccount: "account-123", // Same account - violates business rule
       amount: 100,
@@ -298,27 +569,49 @@ describe("Fluent Validator with Context", () => {
       "Cannot transfer to same account"
     );
 
-    // Test execution failure (runtime error) - step should be "execution"
-    const result2 = await transferCommand.provide({ db: mockDb }).run({
+    // Test execution failure (insufficient funds) - step should be "validation"
+    const result2 = await transferCommand.provide({ externalBankService }).run({
       fromAccount: "insufficient-funds",
       toAccount: "account-456",
       amount: 100,
     });
 
     assert(!result2.success);
-    expect(result2.step).toBe("execution");
-    expect(result2.errors.firstError("global")).toContain("Insufficient funds");
+    expect(result2.step).toBe("validation");
+    expect(result2.errors.firstError("amount")).toContain("Insufficient funds");
+
+    // Test execution failure (frozen account) - step should be "validation"
+    const result3 = await transferCommand.provide({ externalBankService }).run({
+      fromAccount: "frozen-account",
+      toAccount: "account-456",
+      amount: 100,
+    });
+
+    assert(!result3.success);
+    expect(result3.step).toBe("validation");
+    expect(result3.errors.firstError("fromAccount")).toContain("Account is not in a valid state to transfer");
+
+    // Test execution failure (failed in transfer) - step should be "execution"
+    const result4 = await transferCommand.provide({ externalBankService }).run({
+      fromAccount: "fails-in-transfer",
+      toAccount: "account-456",
+      amount: 100,
+    });
+
+    assert(!result4.success);
+    expect(result4.step).toBe("execution");
+    expect(result4.errors.firstError("global")).toContain("Failed in transfer");
 
     // Test successful transfer
-    const result3 = await transferCommand.provide({ db: mockDb }).run({
+    const result5 = await transferCommand.provide({ externalBankService }).run({
       fromAccount: "account-456",
       toAccount: "account-789",
       amount: 50,
     });
 
-    assert(result3.success);
-    expect(result3.result.status).toBe("completed");
-    expect(result3.result.amount).toBe(50);
+    assert(result5.success);
+    expect(result5.result.status).toBe("completed");
+    expect(result5.result.amount).toBe(50);
   });
 
   test("schema validation works", async () => {

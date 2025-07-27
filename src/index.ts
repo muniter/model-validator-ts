@@ -18,8 +18,9 @@ type ErrorKeys<TInput> = TInput extends Record<
 export class ErrorBag<TInput> {
   #issues: Array<{ key: ErrorKeys<TInput>; message: string }> = [];
 
-  addError(key: ErrorKeys<TInput>, message: string) {
+  addError(key: ErrorKeys<TInput>, message: string): this {
     this.#issues.push({ key, message });
+    return this;
   }
 
   firstError(key: ErrorKeys<TInput>): string | undefined {
@@ -210,10 +211,11 @@ type ContextRuleDefinition<
   TReturn = {}
 > = {
   fn: ContextRuleFunction<TInput, TDeps, TInputContext, TReturn>;
+  description?: string;
 };
 
 export type CommandResult<TOutput, TInput, TContext> =
-  | { success: true; result: Exclude<TOutput, ErrorBag<any>>; context: TContext }
+  | { success: true; result: Exclude<TOutput, ErrorBag<any> | void>; context: TContext }
   | { success: false; errors: ErrorBag<TInput>; step: "validation" | "execution" };
 
 type ExtractContext<T> = T extends { context: infer TContext }
@@ -324,7 +326,7 @@ export class Command<
 
     return {
       success: true,
-      result: executeResult as Exclude<TOutput, ErrorBag<any>>,
+      result: executeResult as Exclude<TOutput, ErrorBag<any> | void>,
       context: validation.context,
     };
   }
