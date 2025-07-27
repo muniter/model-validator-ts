@@ -216,8 +216,8 @@ export type CommandResult<TOutput, TInput, TContext> =
   | { validated: true; result: TOutput; context: TContext }
   | { validated: false; errors: ErrorBag<TInput> };
 
-type ExtractContext<T> = T extends { context: infer TContext } 
-  ? TContext 
+type ExtractContext<T> = T extends { context: infer TContext }
+  ? TContext
   : never;
 
 type NonVoidReturnContext<TReturn> = TReturn extends void | Promise<void>
@@ -238,7 +238,12 @@ export class Command<
   TOutput,
   TDepsStatus extends DepsStatus
 > {
-  #validatorBuilder: FluentValidatorBuilder<TSchema, TDeps, TContext, TDepsStatus>;
+  #validatorBuilder: FluentValidatorBuilder<
+    TSchema,
+    TDeps,
+    TContext,
+    TDepsStatus
+  >;
   #execute: (params: {
     data: StandardSchemaV1.InferOutput<TSchema>;
     deps: TDeps;
@@ -246,7 +251,12 @@ export class Command<
   }) => Promise<TOutput> | TOutput;
 
   constructor(
-    validatorBuilder: FluentValidatorBuilder<TSchema, TDeps, TContext, TDepsStatus>,
+    validatorBuilder: FluentValidatorBuilder<
+      TSchema,
+      TDeps,
+      TContext,
+      TDepsStatus
+    >,
     execute: (params: {
       data: StandardSchemaV1.InferOutput<TSchema>;
       deps: TDeps;
@@ -269,12 +279,18 @@ export class Command<
     this: Command<TSchema, TDeps, TContext, TOutput, "passed" | "not-required">,
     input: unknown,
     opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
-  ): Promise<CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>> {
+  ): Promise<
+    CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
+  > {
     const internals = this.#validatorBuilder["~unsafeInternals"];
-    
-    invariant(internals.schema, "Schema must be defined before calling command");
+
     invariant(
-      internals.depsStatus === "passed" || internals.depsStatus === "not-required",
+      internals.schema,
+      "Schema must be defined before calling command"
+    );
+    invariant(
+      internals.depsStatus === "passed" ||
+        internals.depsStatus === "not-required",
       "Deps must be already passed, or not required at command run time"
     );
 
@@ -305,19 +321,20 @@ export class Command<
     this: Command<TSchema, TDeps, TContext, TOutput, "passed" | "not-required">,
     input: StandardSchemaV1.InferInput<TSchema>,
     opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
-  ): Promise<CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>> {
+  ): Promise<
+    CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
+  > {
     return this.run(input, opts);
   }
 }
-type FluentValidatorBuilderConfig<
+type FluentValidatorBuilderState<
   TSchema extends StandardSchemaV1,
   TDeps extends TValidationDeps,
-  TContext
 > = {
-  schema?: TSchema;
-  deps?: TDeps;
-  contextRules?: Array<ContextRuleDefinition<any, any, any, any>>;
-  depsStatus?: DepsStatus;
+  schema: TSchema | undefined;
+  deps: TDeps | undefined;
+  contextRules: Array<ContextRuleDefinition<any, any, any, any>>;
+  depsStatus: DepsStatus;
 };
 
 export class FluentValidatorBuilder<
@@ -326,29 +343,37 @@ export class FluentValidatorBuilder<
   TContext = {},
   TDpesStatus extends DepsStatus = "not-required"
 > {
-  #schema?: TSchema;
-  #deps?: TDeps;
-  #contextRules: Array<
-    ContextRuleDefinition<TSchema, TDeps, TContext, TContext>
-  >;
-  #depsStatus: DepsStatus;
+  #state: FluentValidatorBuilderState<TSchema, TDeps>;
 
-  constructor(config: FluentValidatorBuilderConfig<TSchema, TDeps, TContext> = {}) {
-    this.#schema = config.schema;
-    this.#deps = config.deps;
-    this.#contextRules = config.contextRules || [];
-    this.#depsStatus = config.depsStatus || "not-required";
+  constructor(state?: FluentValidatorBuilderState<TSchema, TDeps>) {
+    this.#state = state || {
+      contextRules: [],
+      schema: undefined,
+      deps: undefined,
+      depsStatus: "not-required",
+    };
+  }
+
+  #setState<
+    NewSchema extends StandardSchemaV1 = TSchema,
+    NewDeps extends TValidationDeps = TDeps,
+    NewContext = TContext,
+    NewDepsStatus extends DepsStatus = TDpesStatus
+  >(
+    updates: Partial<
+      FluentValidatorBuilderState<NewSchema, NewDeps>
+    >
+  ): FluentValidatorBuilder<NewSchema, NewDeps, NewContext, NewDepsStatus> {
+    // Update the state object
+    Object.assign(this.#state, updates);
+    // Return this instance but cast to the new type
+    return this as any;
   }
 
   input<T extends StandardSchemaV1>(
     schema: T
   ): FluentValidatorBuilder<T, TDeps, TContext, TDpesStatus> {
-    return new FluentValidatorBuilder<T, TDeps, TContext, TDpesStatus>({
-      schema,
-      deps: this.#deps,
-      contextRules: this.#contextRules,
-      depsStatus: this.#depsStatus,
-    });
+    return this.#setState<T, TDeps, TContext, TDpesStatus>({ schema });
   }
 
   $deps<T extends TValidationDeps>(): FluentValidatorBuilder<
@@ -357,27 +382,13 @@ export class FluentValidatorBuilder<
     TContext,
     "required"
   > {
-    return new FluentValidatorBuilder<TSchema, T, TContext, "required">({
-      schema: this.#schema,
-      contextRules: this.#contextRules,
+    return this.#setState<TSchema, T, TContext, "required">({
       depsStatus: "required",
     });
   }
 
-  get ["~unsafeInternals"](): {
-    schema?: TSchema;
-    deps?: TDeps;
-    depsStatus: DepsStatus;
-    contextRules: Array<
-      ContextRuleDefinition<TSchema, TDeps, TContext, TContext>
-    >;
-  } {
-    return {
-      schema: this.#schema,
-      deps: this.#deps,
-      depsStatus: this.#depsStatus,
-      contextRules: this.#contextRules,
-    };
+  get ["~unsafeInternals"](): FluentValidatorBuilderState<TSchema, TDeps> {
+    return this.#state;
   }
 
   validate: TDpesStatus extends "required"
@@ -400,17 +411,20 @@ export class FluentValidatorBuilder<
     opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
   ) => {
     invariant(
-      this.#depsStatus !== "required",
+      this.#state.depsStatus !== "required",
       "Deps should be provided before calling validate"
     );
-    invariant(this.#schema, "Schema must be defined before calling validate");
+    invariant(
+      this.#state.schema,
+      "Schema must be defined before calling validate"
+    );
 
     return validate<TSchema, TContext>({
-      schema: this.#schema,
+      schema: this.#state.schema,
       input,
-      rules: this.#contextRules,
+      rules: this.#state.contextRules,
       opts,
-      deps: this.#deps ?? {},
+      deps: this.#state.deps ?? {},
     });
   }) as any;
 
@@ -429,18 +443,12 @@ export class FluentValidatorBuilder<
       : Prettify<TContext & NonVoidReturnContext<TReturn>>,
     TDpesStatus
   > {
-    return new FluentValidatorBuilder<
-      TSchema,
-      TDeps,
-      NonVoidReturnContext<TReturn> extends never
-        ? TContext
-        : Prettify<TContext & NonVoidReturnContext<TReturn>>,
-      TDpesStatus
-    >({
-      schema: this.#schema,
-      deps: this.#deps,
-      contextRules: [...this.#contextRules, rule],
-      depsStatus: this.#depsStatus,
+    type NewContext = NonVoidReturnContext<TReturn> extends never
+      ? TContext
+      : Prettify<TContext & NonVoidReturnContext<TReturn>>;
+
+    return this.#setState<TSchema, TDeps, NewContext, TDpesStatus>({
+      contextRules: [...this.#state.contextRules, rule],
     });
   }
 
@@ -448,10 +456,8 @@ export class FluentValidatorBuilder<
     this: FluentValidatorBuilder<TSchema, TDeps, TContext, "required">,
     deps: TDeps
   ): FluentValidatorBuilder<TSchema, TDeps, TContext, "passed"> {
-    return new FluentValidatorBuilder<TSchema, TDeps, TContext, "passed">({
-      schema: this.#schema,
+    return this.#setState<TSchema, TDeps, TContext, "passed">({
       deps,
-      contextRules: this.#contextRules,
       depsStatus: "passed",
     });
   }

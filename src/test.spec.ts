@@ -20,6 +20,7 @@ describe("Fluent Validator methods", () => {
     const validator = createValidator().input(testSchema);
 
     expect(validator["~unsafeInternals"]).toMatchObject({
+      contextRules: expect.any(Array),
       schema: testSchema,
       deps: undefined,
       depsStatus: "not-required",
@@ -120,6 +121,24 @@ describe("Fluent Validator methods", () => {
       .run({ name: "John" });
     assert(result.validated);
     expect(result.result).toEqual("John");
+  });
+});
+
+describe("Fluent Validator object creation efficiency", () => {
+  test("should reuse the same instance when chaining methods", () => {
+    const validator = createValidator();
+    const withInput = validator.input(z.object({ test: z.string() }));
+    const withDeps = withInput.$deps<{ service: string }>();
+    const withRule = withDeps.addRule({
+      fn: () => {}
+    });
+    const withProvide = withDeps.provide({ service: "test" });
+    
+    // All should be the same underlying object instance
+    expect(validator).toBe(withInput);
+    expect(validator).toBe(withDeps);
+    expect(validator).toBe(withRule);
+    expect(validator).toBe(withProvide);
   });
 });
 
