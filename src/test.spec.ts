@@ -1,6 +1,6 @@
 import { test, expect, describe, assert } from "vitest";
 import { z } from "zod";
-import { createValidator } from "./index.js";
+import { createValidator, ErrorBag } from "./index.js";
 
 const layerRepository = {
   getLayer: async (
@@ -214,6 +214,102 @@ describe("Fluent Validator with Context", () => {
       secret: "123",
     });
     expect(result.value).toEqual(input);
+  });
+
+  test("command provides error bag to allow faliures at execution time", async () => {
+    const transferMoneySchema = z.object({
+      fromAccount: z.string(),
+      toAccount: z.string(),
+      amount: z.number().positive(),
+    });
+
+    // Mock database service
+    const mockDb = {
+      executeTransaction: async (fn: () => Promise<any>) => {
+        try {
+          return await fn();
+        } catch (error) {
+          throw error;
+        }
+      },
+      debit: async (account: string, amount: number) => {
+        if (account === "insufficient-funds") {
+          throw new Error("Insufficient funds");
+        }
+        if (account === "locked-account") {
+          throw new Error("Account is locked");
+        }
+      },
+      credit: async (account: string, amount: number) => {
+        if (account === "closed-account") {
+          throw new Error("Cannot credit closed account");
+        }
+      }
+    };
+
+    const transferCommand = createValidator()
+      .input(transferMoneySchema)
+      .$deps<{ db: typeof mockDb }>()
+      .addRule({
+        fn: async (args) => {
+          // Business rule: Cannot transfer to same account
+          if (args.data.fromAccount === args.data.toAccount) {
+            args.bag.addError("toAccount", "Cannot transfer to same account");
+          }
+        }
+      })
+      .command({
+        execute: async (args) => {
+          try {
+            // All validation passed, execute the transaction
+            await args.deps.db.executeTransaction(async () => {
+              await args.deps.db.debit(args.data.fromAccount, args.data.amount);
+              await args.deps.db.credit(args.data.toAccount, args.data.amount);
+            });
+            
+            return {
+              transactionId: `txn-${Date.now()}`,
+              status: "completed",
+              ...args.data
+            };
+          } catch (error) {
+            // Transaction failed - report the error
+            if (error instanceof Error) {
+              args.bag.addError("global", `Transaction failed: ${error.message}`);
+            }
+            return args.bag;
+          }
+        },
+      });
+
+    // Test insufficient funds
+    const result1 = await transferCommand
+      .provide({ db: mockDb })
+      .run({
+        fromAccount: "insufficient-funds",
+        toAccount: "account-123",
+        amount: 100,
+      });
+    
+    expect(result1.validated).toBe(false);
+    if (!result1.validated) {
+      expect(result1.errors.firstError("global")).toContain("Insufficient funds");
+    }
+
+    // Test successful transfer
+    const result2 = await transferCommand
+      .provide({ db: mockDb })
+      .run({
+        fromAccount: "account-456",
+        toAccount: "account-789",
+        amount: 50,
+      });
+    
+    expect(result2.validated).toBe(true);
+    if (result2.validated) {
+      expect(result2.result.status).toBe("completed");
+      expect(result2.result.amount).toBe(50);
+    }
   });
 
   test("schema validation works", async () => {

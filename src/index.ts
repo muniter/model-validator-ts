@@ -214,7 +214,7 @@ type ContextRuleDefinition<
 
 export type CommandResult<TOutput, TInput, TContext> =
   | { validated: true; result: TOutput; context: TContext }
-  | { validated: false; errors: ErrorBag<TInput> };
+  | { validated: false; errors: ErrorBag<TInput>; step: "validation" | "execution" };
 
 type ExtractContext<T> = T extends { context: infer TContext }
   ? TContext
@@ -248,6 +248,7 @@ export class Command<
     data: StandardSchemaV1.InferOutput<TSchema>;
     deps: TDeps;
     context: TContext;
+    bag: ErrorBag<StandardSchemaV1.InferOutput<TSchema>>;
   }) => Promise<TOutput> | TOutput;
 
   constructor(
@@ -261,6 +262,7 @@ export class Command<
       data: StandardSchemaV1.InferOutput<TSchema>;
       deps: TDeps;
       context: TContext;
+      bag: ErrorBag<StandardSchemaV1.InferOutput<TSchema>>;
     }) => Promise<TOutput> | TOutput
   ) {
     this.#validatorBuilder = validatorBuilder;
@@ -297,17 +299,27 @@ export class Command<
     const validation = await this.#validatorBuilder.validate(input, opts);
 
     if (!validation.success) {
-      return { validated: false, errors: validation.errors };
+      return { validated: false, errors: validation.errors, step: "validation" };
     }
+
+    // Create a new error bag for the command execution
+    const executionBag = new ErrorBag<StandardSchemaV1.InferOutput<TSchema>>();
 
     const executeResult = await this.#execute({
       data: validation.value,
       deps: internals.deps!,
       context: validation.context,
+      bag: executionBag,
     });
 
+    // Check if errors were added to the bag during execution
+    if (executionBag.hasErrors()) {
+      return { validated: false, errors: executionBag, step: "execution" };
+    }
+
+    // Check if the execute function returned an ErrorBag
     if (executeResult instanceof ErrorBag) {
-      return { validated: false, errors: executeResult };
+      return { validated: false, errors: executeResult, step: "execution" };
     }
 
     return {
@@ -467,6 +479,7 @@ export class FluentValidatorBuilder<
       data: StandardSchemaV1.InferOutput<TSchema>;
       deps: TDeps;
       context: TContext;
+      bag: ErrorBag<StandardSchemaV1.InferOutput<TSchema>>;
     }) => Promise<TOutput> | TOutput;
   }): Command<TSchema, TDeps, TContext, TOutput, TDpesStatus> {
     return new Command(this, args.execute);
