@@ -12,6 +12,15 @@ const userRepository = {
     }
     return null;
   },
+  findUserById: async (
+    id: string
+  ): Promise<{ id: string; email: string } | null> => {
+    // Simulate existing users
+    if (id === "user-456") {
+      return { id, email: "newemail@example.com" };
+    }
+    return null;
+  },
   isEmailBlacklisted: async (email: string): Promise<boolean> => {
     // Simulate blacklisted domains/emails
     const blacklistedDomains = ["spam.com", "blocked.net"];
@@ -78,14 +87,15 @@ describe("Basic Validator API", () => {
       depsStatus: "required",
     });
 
-    expect(
-      // @ts-expect-error - validate method should not be available when deps are required
-      () =>
-        validator.validate({
-          email: "john@example.com",
-          name: "John Doe",
-          age: 25,
-        })
+    expect(() =>
+      // @ts-expect-error: Validate is not available at the type level, this is correct
+      // but we also want to test runtime behavior and that's an error being thrown because
+      // the method is actually there but should not be called
+      validator.validate({
+        email: "john@example.com",
+        name: "John Doe",
+        age: 25,
+      })
     ).toThrow("Deps should be provided before calling validate");
   });
 
@@ -195,15 +205,20 @@ describe("Context Passing & Rule Chain", () => {
         userRepository: UserRepository;
       }>()
       .addRule({
+        id: "user-exists-check",
         description: "Check if user exists",
         fn: async (args) => {
-          const user = await args.deps.userRepository.findUserByEmail(
+          const user = await args.deps.userRepository.findUserById(
             args.data.userId
           );
           if (!user) {
             return args.bag.addError("userId", "User not found");
           }
-          return { context: { user } };
+          return {
+            context: {
+              user,
+            },
+          };
         },
       })
       .addRule({
@@ -219,6 +234,7 @@ describe("Context Passing & Rule Chain", () => {
         },
       })
       .addRule({
+        id: "blacklist-check-context",
         description: "Check if new email is blacklisted",
         fn: async (args) => {
           expect(args.context.user).toBeDefined();
@@ -252,6 +268,7 @@ describe("Context Passing & Rule Chain", () => {
       })
       .provide({ userRepository });
 
+    // Test successful case
     const input = {
       userId: "user-456",
       newEmail: "newemail@example.com",
@@ -259,10 +276,33 @@ describe("Context Passing & Rule Chain", () => {
     const result = await updateEmailValidatorDefinition.validate(input);
     assert(result.success);
     expect(result.context).toMatchObject({
-      existingUser: null,
+      user: { id: "user-456", email: "newemail@example.com" },
       validationToken: "abc123",
     });
     expect(result.value).toEqual(input);
+
+    // Test failure case to check rule tracking with blacklisted email
+    const failResult = await updateEmailValidatorDefinition.validate({
+      userId: "user-456",
+      // This will trigger blacklist rule
+      newEmail: "test@spam.com",
+    });
+    assert(!failResult.success);
+    expect(failResult.errors.firstError("newEmail")).toBe(
+      "Email domain is not allowed"
+    );
+    expect(failResult.rule).toMatchObject({
+      id: "blacklist-check-context",
+      description: "Check if new email is blacklisted",
+    });
+
+    const failNoExists = await updateEmailValidatorDefinition.validate({
+      userId: "user-789",
+      newEmail: "test@spam.com",
+    });
+    assert(!failNoExists.success);
+    expect(failNoExists.errors.firstError("userId")).toBe("User not found");
+    expect(failNoExists.rule?.id).toBe("user-exists-check");
   });
 });
 
@@ -320,9 +360,11 @@ describe("Command API", () => {
     });
 
     // Without providing deps, the command should throw an error
-    expect(() =>
+    await expect(
       command.run({ email: "john@example.com", name: "John Doe", age: 25 })
-    ).toThrow("Deps should be provided before calling run");
+    ).rejects.toThrow(
+      "Deps must be already passed, or not required at command run time"
+    );
 
     const result = await command
       .provide({ userRepository })
@@ -351,6 +393,7 @@ describe("Real-world Validation Examples", () => {
         .input(userRegistrationSchema)
         .$deps<{ userRepository: UserRepository }>()
         .addRule({
+          id: "duplicate-email-check",
           description: "Check for duplicate email",
           fn: async (args) => {
             const existingUser = await args.deps.userRepository.findUserByEmail(
@@ -372,6 +415,8 @@ describe("Real-world Validation Examples", () => {
 
       assert(!result1.success);
       expect(result1.errors.firstError("email")).toBe("Email already exists");
+      expect(result1.rule?.id).toBe("duplicate-email-check");
+      expect(result1.rule?.description).toBe("Check for duplicate email");
 
       // Test with new email
       const result2 = await userRegistrationValidator.validate({
@@ -389,6 +434,7 @@ describe("Real-world Validation Examples", () => {
         .input(userRegistrationSchema)
         .$deps<{ userRepository: UserRepository }>()
         .addRule({
+          id: "blacklist-check",
           description: "Check for blacklisted email",
           fn: async (args) => {
             const isBlacklisted =
@@ -413,6 +459,8 @@ describe("Real-world Validation Examples", () => {
       expect(result1.errors.firstError("email")).toBe(
         "Email domain is not allowed"
       );
+      expect(result1.rule?.id).toBe("blacklist-check");
+      expect(result1.rule?.description).toBe("Check for blacklisted email");
 
       // Test with blacklisted specific email
       const result2 = await userRegistrationValidator.validate({
@@ -482,6 +530,7 @@ describe("Real-world Validation Examples", () => {
         .input(userRegistrationSchema)
         .$deps<{ userRepository: UserRepository }>()
         .addRule({
+          id: "command-duplicate-check",
           description: "Check for duplicate email",
           fn: async (args) => {
             const existingUser = await args.deps.userRepository.findUserByEmail(
@@ -493,6 +542,7 @@ describe("Real-world Validation Examples", () => {
           },
         })
         .addRule({
+          id: "command-blacklist-check",
           description: "Check for blacklisted email",
           fn: async (args) => {
             const isBlacklisted =
@@ -540,6 +590,8 @@ describe("Real-world Validation Examples", () => {
       assert(!result2.success);
       expect(result2.step).toBe("validation");
       expect(result2.errors.firstError("email")).toBe("Email already exists");
+      expect(result2.rule?.id).toBe("command-duplicate-check");
+      expect(result2.rule?.description).toBe("Check for duplicate email");
 
       // Test failed registration due to blacklisted email
       const result3 = await userRegistrationCommand
@@ -555,6 +607,8 @@ describe("Real-world Validation Examples", () => {
       expect(result3.errors.firstError("email")).toBe(
         "Email domain is not allowed"
       );
+      expect(result3.rule?.id).toBe("command-blacklist-check");
+      expect(result3.rule?.description).toBe("Check for blacklisted email");
     });
   });
 
@@ -599,6 +653,7 @@ describe("Real-world Validation Examples", () => {
         .input(transferMoneySchema)
         .$deps<{ externalBankService: typeof externalBankService }>()
         .addRule({
+          id: "no-self-transfer",
           description: "Validate no transfer to same account",
           fn: async (args) => {
             // Business rule: Cannot transfer to same account
@@ -608,12 +663,13 @@ describe("Real-world Validation Examples", () => {
           },
         })
         .addRule({
+          id: "account-status-check",
           description: "Validate account status",
           fn: async (args) => {
             // Validate account status
             await args.deps.externalBankService
               .validateAccountStatus(args.data.fromAccount)
-              .catch((error) => {
+              .catch((_error) => {
                 args.bag.addError(
                   "fromAccount",
                   "Account is not in a valid state to transfer"
@@ -621,7 +677,7 @@ describe("Real-world Validation Examples", () => {
               });
             await args.deps.externalBankService
               .validateAccountStatus(args.data.toAccount)
-              .catch((error) => {
+              .catch((_error) => {
                 args.bag.addError(
                   "toAccount",
                   "Account is not in a valid state to transfer"
@@ -630,6 +686,7 @@ describe("Real-world Validation Examples", () => {
           },
         })
         .addRule({
+          id: "balance-check",
           description: "Check if from account has sufficient balance",
           fn: async (args) => {
             const fromBalance =
@@ -678,6 +735,10 @@ describe("Real-world Validation Examples", () => {
       expect(result1.errors.firstError("toAccount")).toContain(
         "Cannot transfer to same account"
       );
+      expect(result1.rule).toMatchObject({
+        id: "no-self-transfer",
+        description: "Validate no transfer to same account",
+      });
 
       // Test execution failure (insufficient funds) - step should be "validation"
       const result2 = await transferCommand
@@ -693,6 +754,10 @@ describe("Real-world Validation Examples", () => {
       expect(result2.errors.firstError("amount")).toContain(
         "Insufficient funds"
       );
+      expect(result2.rule).toMatchObject({
+        id: "balance-check",
+        description: "Check if from account has sufficient balance",
+      });
 
       // Test execution failure (frozen account) - step should be "validation"
       const result3 = await transferCommand
@@ -708,6 +773,10 @@ describe("Real-world Validation Examples", () => {
       expect(result3.errors.firstError("fromAccount")).toContain(
         "Account is not in a valid state to transfer"
       );
+      expect(result3.rule).toMatchObject({
+        id: "account-status-check",
+        description: "Validate account status",
+      });
 
       // Test execution failure (failed in transfer) - step should be "execution"
       const result4 = await transferCommand
@@ -723,6 +792,7 @@ describe("Real-world Validation Examples", () => {
       expect(result4.errors.firstError("global")).toContain(
         "Failed in transfer"
       );
+      expect(result4.rule).toBeUndefined();
 
       // Test successful transfer
       const result5 = await transferCommand

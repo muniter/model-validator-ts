@@ -317,7 +317,7 @@ export class Command<
         success: false,
         errors: validation.errors,
         step: "validation",
-        rule: undefined,
+        rule: validation.rule,
       };
     }
 
@@ -434,6 +434,7 @@ export class FluentValidatorBuilder<
         | {
             success: false;
             errors: ErrorBag<StandardSchemaV1.InferInput<TSchema>>;
+            rule?: { id?: string; description?: string };
           }
       > = ((
     input: unknown,
