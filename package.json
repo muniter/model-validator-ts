@@ -16,7 +16,7 @@
   "homepage": "https://github.com/muniter/model-validator-ts#readme",
   "scripts": {
     "build": "tsc",
-    "test": "vitest",
+    "test": "vitest --run",
     "lint": "tsc --noEmit",
     "prepublishOnly": "pnpm build"
   },

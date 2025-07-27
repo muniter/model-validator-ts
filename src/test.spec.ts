@@ -42,7 +42,7 @@ describe("Fluent Validator methods", () => {
     });
 
     expect(
-      // @ts-expect-error - Deps are not provided, depsStatus is required
+      // @ts-expect-error - Deps are not provided, depsStatus is required so the .validate method should not be available at the type level
       () => validator.validate({ name: "John" })
     ).toThrow("Deps must be passed or not required at validation time");
   });
@@ -116,6 +116,7 @@ describe("Fluent Validator methods", () => {
     });
 
     const result = await command
+      // FIX: Here provide should be required, and there, run should not exist since we have not passed the desp before
       .provide({ layerRepository })
       .run({ name: "John" });
     assert(result.validated);
@@ -154,7 +155,7 @@ describe("Fluent Validator with Context", () => {
             layer.classification === "confidential" &&
             args.data.visibility === "public"
           ) {
-            return args.bag.addError(
+            args.bag.addError(
               "visibility",
               "Layers with confidential classification cannot be public visibility"
             );

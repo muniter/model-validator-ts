@@ -172,7 +172,9 @@ async function validate<
     }
 
     if (result && typeof result === "object") {
-      context = { ...context, ...result };
+      if (result !== undefined && result !== null) {
+        context = { ...context, ...result };
+      }
     }
   }
 
@@ -316,7 +318,7 @@ export class FluentValidatorBuilder<
     });
   }
 
-  addRule<TOutputContext>(
+  addRule<TOutputContext = {}>(
     rule: ContextRuleDefinition<
       StandardSchemaV1.InferOutput<TSchema>,
       TDeps,
@@ -332,7 +334,8 @@ export class FluentValidatorBuilder<
     return new FluentValidatorBuilder<
       TSchema,
       TDeps,
-      TContext & TOutputContext
+      TContext & TOutputContext,
+      TDpesStatus
     >()
       .setSchema(this.#schema)
       .setDeps(this.#deps)
@@ -352,12 +355,6 @@ export class FluentValidatorBuilder<
   }
 
   command<TOutput>(
-    this: FluentValidatorBuilder<
-      TSchema,
-      TDeps,
-      TContext,
-      "passed" | "not-required"
-    >,
     args: {
       execute: (params: {
         data: StandardSchemaV1.InferOutput<TSchema>;
@@ -365,30 +362,7 @@ export class FluentValidatorBuilder<
         context: TContext;
       }) => Promise<TOutput> | TOutput;
     }
-  ): {
-    runShape: (
-      input: StandardSchemaV1.InferInput<TSchema>,
-      opts?: ValidationOpts<TSchema>
-    ) => Promise<
-      CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-    >;
-    run: (
-      input: unknown,
-      opts?: ValidationOpts<TSchema>
-    ) => Promise<
-      CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-    >;
-  };
-  command<TOutput>(
-    this: FluentValidatorBuilder<TSchema, TDeps, TContext, "required">,
-    args: {
-      execute: (params: {
-        data: StandardSchemaV1.InferOutput<TSchema>;
-        deps: TDeps;
-        context: TContext;
-      }) => Promise<TOutput> | TOutput;
-    }
-  ): {
+  ): TDpesStatus extends "required" ? {
     provide: (deps: TDeps) => {
       runShape: (
         input: StandardSchemaV1.InferInput<TSchema>,
@@ -403,22 +377,21 @@ export class FluentValidatorBuilder<
         CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
       >;
     };
-  };
-  command<TOutput>(
-    this: FluentValidatorBuilder<
-      TSchema,
-      TDeps,
-      TContext,
-      "not-required" | "passed" | "required"
-    >,
-    args: {
-      execute: (params: {
-        data: StandardSchemaV1.InferOutput<TSchema>;
-        deps: TDeps;
-        context: TContext;
-      }) => Promise<TOutput> | TOutput;
-    }
-  ) {
+  } : {
+    runShape: (
+      input: StandardSchemaV1.InferInput<TSchema>,
+      opts?: ValidationOpts<TSchema>
+    ) => Promise<
+      CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
+    >;
+    run: (
+      input: unknown,
+      opts?: ValidationOpts<TSchema>
+    ) => Promise<
+      CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
+    >;
+  } {
+
     const executeCommand = async (
       input: unknown,
       opts: ValidationOpts<StandardSchemaV1.InferInput<TSchema>> | undefined,
@@ -426,15 +399,15 @@ export class FluentValidatorBuilder<
     ): Promise<
       CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
     > => {
-      console.dir(this["~unsafeInternals"], { depth: null });
       invariant(this.#schema, "Schema must be defined before calling command");
       invariant(
         this.#depsStatus === "passed" || this.#depsStatus === "not-required",
         "Deps must be already passed, or not required at command run time"
       );
 
+      // @ts-expect-error - This error is fine, typescript can't know
+      // that we already checked that the deps are passed or not required
       const validation = await this.validate(input, opts);
-
       if (!validation.success) {
         return { validated: false, errors: validation.errors };
       }
@@ -467,7 +440,7 @@ export class FluentValidatorBuilder<
         ) => {
           return executeCommand(input, opts, this.#deps!);
         },
-      };
+      } as any;
     } else {
       return {
         provide: (deps: TDeps) => {
@@ -485,7 +458,7 @@ export class FluentValidatorBuilder<
             },
           };
         },
-      };
+      } as any;
     }
   }
 }
