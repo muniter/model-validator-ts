@@ -1,6 +1,6 @@
 import { test, expect, describe, assert } from "vitest";
 import { z } from "zod";
-import { createValidator, ErrorBag } from "./index.js";
+import { createValidator } from "./index.js";
 
 const layerRepository = {
   getLayer: async (

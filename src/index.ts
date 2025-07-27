@@ -213,7 +213,7 @@ type ContextRuleDefinition<
 };
 
 export type CommandResult<TOutput, TInput, TContext> =
-  | { success: true; result: TOutput; context: TContext }
+  | { success: true; result: Exclude<TOutput, ErrorBag<any>>; context: TContext }
   | { success: false; errors: ErrorBag<TInput>; step: "validation" | "execution" };
 
 type ExtractContext<T> = T extends { context: infer TContext }
@@ -324,7 +324,7 @@ export class Command<
 
     return {
       success: true,
-      result: executeResult,
+      result: executeResult as Exclude<TOutput, ErrorBag<any>>,
       context: validation.context,
     };
   }
