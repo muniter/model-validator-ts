@@ -118,6 +118,7 @@ async function validate<
   | {
       success: false;
       errors: ErrorBag<StandardSchemaV1.InferOutput<TSchema>>;
+      rule: { id?: string; description?: string } | undefined;
     }
 > {
   const override = args.opts?.override;
@@ -155,6 +156,7 @@ async function validate<
     return {
       success: false as const,
       errors: bag,
+      rule: undefined,
     };
   }
 
@@ -169,7 +171,7 @@ async function validate<
     });
 
     if (bag.hasErrors()) {
-      return { success: false, errors: bag };
+      return { success: false, errors: bag, rule: { id: rule.id, description: rule.description } };
     }
 
     if (result && typeof result === "object") {
@@ -212,11 +214,21 @@ type ContextRuleDefinition<
 > = {
   fn: ContextRuleFunction<TInput, TDeps, TInputContext, TReturn>;
   description?: string;
+  id?: string;
 };
 
 export type CommandResult<TOutput, TInput, TContext> =
-  | { success: true; result: Exclude<TOutput, ErrorBag<any> | void>; context: TContext }
-  | { success: false; errors: ErrorBag<TInput>; step: "validation" | "execution" };
+  | {
+      success: true;
+      result: Exclude<TOutput, ErrorBag<any> | void>;
+      context: TContext;
+    }
+  | {
+      success: false;
+      errors: ErrorBag<TInput>;
+      step: "validation" | "execution";
+      rule?: { id?: string; description?: string };
+    };
 
 type ExtractContext<T> = T extends { context: infer TContext }
   ? TContext
@@ -301,7 +313,12 @@ export class Command<
     const validation = await this.#validatorBuilder.validate(input, opts);
 
     if (!validation.success) {
-      return { success: false, errors: validation.errors, step: "validation" };
+      return {
+        success: false,
+        errors: validation.errors,
+        step: "validation",
+        rule: undefined,
+      };
     }
 
     // Create a new error bag for the command execution
@@ -316,12 +333,12 @@ export class Command<
 
     // Check if errors were added to the bag during execution
     if (executionBag.hasErrors()) {
-      return { success: false, errors: executionBag, step: "execution" };
+      return { success: false, errors: executionBag, step: "execution", rule: undefined };
     }
 
     // Check if the execute function returned an ErrorBag
     if (executeResult instanceof ErrorBag) {
-      return { success: false, errors: executeResult, step: "execution" };
+      return { success: false, errors: executeResult, step: "execution", rule: undefined };
     }
 
     return {
@@ -343,7 +360,7 @@ export class Command<
 }
 type FluentValidatorBuilderState<
   TSchema extends StandardSchemaV1,
-  TDeps extends TValidationDeps,
+  TDeps extends TValidationDeps
 > = {
   schema: TSchema | undefined;
   deps: TDeps | undefined;
@@ -374,9 +391,7 @@ export class FluentValidatorBuilder<
     NewContext = TContext,
     NewDepsStatus extends DepsStatus = TDpesStatus
   >(
-    updates: Partial<
-      FluentValidatorBuilderState<NewSchema, NewDeps>
-    >
+    updates: Partial<FluentValidatorBuilderState<NewSchema, NewDeps>>
   ): FluentValidatorBuilder<NewSchema, NewDeps, NewContext, NewDepsStatus> {
     // Update the state object
     Object.assign(this.#state, updates);
