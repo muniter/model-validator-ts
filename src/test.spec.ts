@@ -189,6 +189,12 @@ describe("Fluent Validator with Context", () => {
     };
     const result = await upateLayerValidatorDefinition.validate(input);
     assert(result.success);
+    expect(result.context).toMatchObject({
+      layer: expect.objectContaining({
+        name: expect.any(String),
+      }),
+      secret: "123",
+    });
     expect(result.value).toEqual(input);
   });
 
