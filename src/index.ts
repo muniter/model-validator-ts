@@ -213,8 +213,8 @@ type ContextRuleDefinition<
 };
 
 export type CommandResult<TOutput, TInput, TContext> =
-  | { validated: true; result: TOutput; context: TContext }
-  | { validated: false; errors: ErrorBag<TInput>; step: "validation" | "execution" };
+  | { success: true; result: TOutput; context: TContext }
+  | { success: false; errors: ErrorBag<TInput>; step: "validation" | "execution" };
 
 type ExtractContext<T> = T extends { context: infer TContext }
   ? TContext
@@ -299,7 +299,7 @@ export class Command<
     const validation = await this.#validatorBuilder.validate(input, opts);
 
     if (!validation.success) {
-      return { validated: false, errors: validation.errors, step: "validation" };
+      return { success: false, errors: validation.errors, step: "validation" };
     }
 
     // Create a new error bag for the command execution
@@ -314,16 +314,16 @@ export class Command<
 
     // Check if errors were added to the bag during execution
     if (executionBag.hasErrors()) {
-      return { validated: false, errors: executionBag, step: "execution" };
+      return { success: false, errors: executionBag, step: "execution" };
     }
 
     // Check if the execute function returned an ErrorBag
     if (executeResult instanceof ErrorBag) {
-      return { validated: false, errors: executeResult, step: "execution" };
+      return { success: false, errors: executeResult, step: "execution" };
     }
 
     return {
-      validated: true,
+      success: true,
       result: executeResult,
       context: validation.context,
     };

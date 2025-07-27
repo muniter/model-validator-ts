@@ -93,7 +93,7 @@ describe("Fluent Validator methods", () => {
     });
 
     const result = await command.run({ name: "John" });
-    assert(result.validated);
+    assert(result.success);
     expect(result.result).toEqual("John");
   });
 
@@ -119,7 +119,7 @@ describe("Fluent Validator methods", () => {
     const result = await command
       .provide({ layerRepository })
       .run({ name: "John" });
-    assert(result.validated);
+    assert(result.success);
     expect(result.result).toEqual("John");
   });
 });
@@ -130,10 +130,10 @@ describe("Fluent Validator object creation efficiency", () => {
     const withInput = validator.input(z.object({ test: z.string() }));
     const withDeps = withInput.$deps<{ service: string }>();
     const withRule = withDeps.addRule({
-      fn: () => {}
+      fn: () => {},
     });
     const withProvide = withDeps.provide({ service: "test" });
-    
+
     // All should be the same underlying object instance
     expect(validator).toBe(withInput);
     expect(validator).toBe(withDeps);
@@ -244,7 +244,7 @@ describe("Fluent Validator with Context", () => {
         if (account === "closed-account") {
           throw new Error("Cannot credit closed account");
         }
-      }
+      },
     };
 
     const transferCommand = createValidator()
@@ -256,7 +256,7 @@ describe("Fluent Validator with Context", () => {
           if (args.data.fromAccount === args.data.toAccount) {
             args.bag.addError("toAccount", "Cannot transfer to same account");
           }
-        }
+        },
       })
       .command({
         execute: async (args) => {
@@ -266,50 +266,59 @@ describe("Fluent Validator with Context", () => {
               await args.deps.db.debit(args.data.fromAccount, args.data.amount);
               await args.deps.db.credit(args.data.toAccount, args.data.amount);
             });
-            
+
             return {
               transactionId: `txn-${Date.now()}`,
               status: "completed",
-              ...args.data
+              ...args.data,
             };
           } catch (error) {
             // Transaction failed - report the error
             if (error instanceof Error) {
-              args.bag.addError("global", `Transaction failed: ${error.message}`);
+              args.bag.addError(
+                "global",
+                `Transaction failed: ${error.message}`
+              );
             }
             return args.bag;
           }
         },
       });
 
-    // Test insufficient funds
-    const result1 = await transferCommand
-      .provide({ db: mockDb })
-      .run({
-        fromAccount: "insufficient-funds",
-        toAccount: "account-123",
-        amount: 100,
-      });
-    
-    expect(result1.validated).toBe(false);
-    if (!result1.validated) {
-      expect(result1.errors.firstError("global")).toContain("Insufficient funds");
-    }
+    // Test validation failure (business rule violation) - step should be "validation"
+    const result1 = await transferCommand.provide({ db: mockDb }).run({
+      fromAccount: "account-123",
+      toAccount: "account-123", // Same account - violates business rule
+      amount: 100,
+    });
+
+    assert(!result1.success);
+    expect(result1.step).toBe("validation");
+    expect(result1.errors.firstError("toAccount")).toContain(
+      "Cannot transfer to same account"
+    );
+
+    // Test execution failure (runtime error) - step should be "execution"
+    const result2 = await transferCommand.provide({ db: mockDb }).run({
+      fromAccount: "insufficient-funds",
+      toAccount: "account-456",
+      amount: 100,
+    });
+
+    assert(!result2.success);
+    expect(result2.step).toBe("execution");
+    expect(result2.errors.firstError("global")).toContain("Insufficient funds");
 
     // Test successful transfer
-    const result2 = await transferCommand
-      .provide({ db: mockDb })
-      .run({
-        fromAccount: "account-456",
-        toAccount: "account-789",
-        amount: 50,
-      });
-    
-    expect(result2.validated).toBe(true);
-    if (result2.validated) {
-      expect(result2.result.status).toBe("completed");
-      expect(result2.result.amount).toBe(50);
-    }
+    const result3 = await transferCommand.provide({ db: mockDb }).run({
+      fromAccount: "account-456",
+      toAccount: "account-789",
+      amount: 50,
+    });
+
+    assert(result3.success);
+    expect(result3.result.status).toBe("completed");
+    expect(result3.result.amount).toBe(50);
   });
 
   test("schema validation works", async () => {
@@ -326,34 +335,30 @@ describe("Fluent Validator with Context", () => {
         },
       });
 
-    // Test with invalid input (name too short)
+    // Test with invalid input (name too short) - should be validation step
     const result1 = await commandDefinition.run({
       name: "ab",
       age: 20,
     });
-    expect(result1.validated).toBe(false);
-    if (!result1.validated) {
-      expect(result1.errors.firstError("name")).toContain("3");
-    }
+    assert(!result1.success);
+    expect(result1.step).toBe("validation");
+    expect(result1.errors.firstError("name")).toContain("3");
 
-    // Test with invalid input (age too low)
+    // Test with invalid input (age too low) - should be validation step
     const result2 = await commandDefinition.run({
       name: "John",
       age: 17,
     });
-    expect(result2.validated).toBe(false);
-    if (!result2.validated) {
-      expect(result2.errors.firstError("age")).toContain("18");
-    }
+    assert(!result2.success);
+    expect(result2.step).toBe("validation");
+    expect(result2.errors.firstError("age")).toContain("18");
 
     // Test with valid input
     const result3 = await commandDefinition.run({
       name: "John",
       age: 25,
     });
-    expect(result3.validated).toBe(true);
-    if (result3.validated) {
-      expect(result3.result).toEqual({ id: "123", name: "John", age: 25 });
-    }
+    assert(result3.success);
+    expect(result3.result).toEqual({ id: "123", name: "John", age: 25 });
   });
 });
