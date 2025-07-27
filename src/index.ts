@@ -172,7 +172,7 @@ async function validate<
     }
 
     if (result && typeof result === "object") {
-      context = Object.assign(context, result);
+      context = { ...context, ...result };
     }
   }
 
