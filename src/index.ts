@@ -172,8 +172,14 @@ async function validate<
     }
 
     if (result && typeof result === "object") {
-      if (result !== undefined && result !== null) {
-        context = { ...context, ...result };
+      if (
+        result !== undefined &&
+        result !== null &&
+        "context" in result &&
+        typeof result.context === "object" &&
+        result.context !== null
+      ) {
+        context = { ...context, ...result.context };
       }
     }
   }
@@ -189,26 +195,39 @@ type ContextRuleFunction<
   TInput,
   TDeps extends TValidationDeps = {},
   TInputContext = {},
-  TOutputContext = {}
+  TReturn = {}
 > = (args: {
   data: TInput;
   deps: TDeps;
   bag: ErrorBag<TInput>;
   context: TInputContext;
-}) => TOutputContext | Promise<TOutputContext> | void | Promise<void>;
+}) => TReturn | Promise<TReturn> | void | Promise<void>;
 
 type ContextRuleDefinition<
   TInput,
   TDeps extends TValidationDeps = {},
   TInputContext = {},
-  TOutputContext = {}
+  TReturn = {}
 > = {
-  fn: ContextRuleFunction<TInput, TDeps, TInputContext, TOutputContext>;
+  fn: ContextRuleFunction<TInput, TDeps, TInputContext, TReturn>;
 };
 
 export type CommandResult<TOutput, TInput, TContext> =
   | { validated: true; result: TOutput; context: TContext }
   | { validated: false; errors: ErrorBag<TInput> };
+
+type ExtractContext<T> = T extends { context: infer TContext } 
+  ? TContext 
+  : never;
+
+type NonVoidReturnContext<TReturn> = TReturn extends void | Promise<void>
+  ? never
+  : ExtractContext<TReturn>;
+
+// Utility type to flatten intersection types for better display
+type Prettify<T> = {
+  [K in keyof T]: T[K];
+} & {};
 
 type DepsStatus = "not-required" | "required" | "passed";
 export class FluentValidatorBuilder<
@@ -318,23 +337,27 @@ export class FluentValidatorBuilder<
     });
   }
 
-  addRule<TOutputContext = {}>(
+  addRule<TReturn>(
     rule: ContextRuleDefinition<
       StandardSchemaV1.InferOutput<TSchema>,
       TDeps,
       TContext,
-      TOutputContext
+      TReturn
     >
   ): FluentValidatorBuilder<
     TSchema,
     TDeps,
-    TContext & TOutputContext,
+    NonVoidReturnContext<TReturn> extends never
+      ? TContext
+      : Prettify<TContext & NonVoidReturnContext<TReturn>>,
     TDpesStatus
   > {
     return new FluentValidatorBuilder<
       TSchema,
       TDeps,
-      TContext & TOutputContext,
+      NonVoidReturnContext<TReturn> extends never
+        ? TContext
+        : Prettify<TContext & NonVoidReturnContext<TReturn>>,
       TDpesStatus
     >()
       .setSchema(this.#schema)
@@ -354,44 +377,51 @@ export class FluentValidatorBuilder<
       .setRules(this.#contextRules);
   }
 
-  command<TOutput>(
-    args: {
-      execute: (params: {
-        data: StandardSchemaV1.InferOutput<TSchema>;
-        deps: TDeps;
-        context: TContext;
-      }) => Promise<TOutput> | TOutput;
-    }
-  ): TDpesStatus extends "required" ? {
-    provide: (deps: TDeps) => {
-      runShape: (
-        input: StandardSchemaV1.InferInput<TSchema>,
-        opts?: ValidationOpts<TSchema>
-      ) => Promise<
-        CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-      >;
-      run: (
-        input: unknown,
-        opts?: ValidationOpts<TSchema>
-      ) => Promise<
-        CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-      >;
-    };
-  } : {
-    runShape: (
-      input: StandardSchemaV1.InferInput<TSchema>,
-      opts?: ValidationOpts<TSchema>
-    ) => Promise<
-      CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-    >;
-    run: (
-      input: unknown,
-      opts?: ValidationOpts<TSchema>
-    ) => Promise<
-      CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-    >;
-  } {
-
+  command<TOutput>(args: {
+    execute: (params: {
+      data: StandardSchemaV1.InferOutput<TSchema>;
+      deps: TDeps;
+      context: TContext;
+    }) => Promise<TOutput> | TOutput;
+  }): TDpesStatus extends "required"
+    ? {
+        provide: (deps: TDeps) => {
+          runShape: (
+            input: StandardSchemaV1.InferInput<TSchema>,
+            opts?: ValidationOpts<TSchema>
+          ) => Promise<
+            CommandResult<
+              TOutput,
+              StandardSchemaV1.InferInput<TSchema>,
+              TContext
+            >
+          >;
+          run: (
+            input: unknown,
+            opts?: ValidationOpts<TSchema>
+          ) => Promise<
+            CommandResult<
+              TOutput,
+              StandardSchemaV1.InferInput<TSchema>,
+              TContext
+            >
+          >;
+        };
+      }
+    : {
+        runShape: (
+          input: StandardSchemaV1.InferInput<TSchema>,
+          opts?: ValidationOpts<TSchema>
+        ) => Promise<
+          CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
+        >;
+        run: (
+          input: unknown,
+          opts?: ValidationOpts<TSchema>
+        ) => Promise<
+          CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
+        >;
+      } {
     const executeCommand = async (
       input: unknown,
       opts: ValidationOpts<StandardSchemaV1.InferInput<TSchema>> | undefined,

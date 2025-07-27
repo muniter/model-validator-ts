@@ -3,7 +3,9 @@ import { z } from "zod";
 import { createValidator } from "./index.js";
 
 const layerRepository = {
-  getLayer: async (id: string): Promise<{ name: string } | null> => {
+  getLayer: async (
+    id: string
+  ): Promise<{ name: string; classification?: string } | null> => {
     if (id === "layer-1") {
       return { name: "Layer 1" };
     }
@@ -95,13 +97,11 @@ describe("Fluent Validator methods", () => {
   });
 
   test("Command can be called after providing deps", async () => {
-    const validator = createValidator()
-      .input(testSchema)
-      .$deps<{
-        layerRepository: {
-          getLayer: (id: string) => Promise<{ name: string } | null>;
-        };
-      }>()
+    const validator = createValidator().input(testSchema).$deps<{
+      layerRepository: {
+        getLayer: (id: string) => Promise<{ name: string } | null>;
+      };
+    }>();
 
     expect(validator["~unsafeInternals"]).toMatchObject({
       schema: testSchema,
@@ -144,7 +144,7 @@ describe("Fluent Validator with Context", () => {
           if (!layer) {
             return args.bag.addError("layerId", "Layer not found");
           }
-          return { layer };
+          return { context: { layer } };
         },
       })
       .addRule({
@@ -160,6 +160,25 @@ describe("Fluent Validator with Context", () => {
               "Layers with confidential classification cannot be public visibility"
             );
           }
+
+          return { context: { secret: "123" } };
+        },
+      })
+      .addRule({
+        fn: async (args) => {
+          expect(args.context).toBeDefined();
+          const secret = args.context.secret;
+          const layer = args.context.layer;
+
+          expect({
+            secret,
+            layer,
+          }).toMatchObject({
+            layer: expect.objectContaining({
+              name: expect.any(String),
+            }),
+            secret: "123",
+          } as const);
         },
       })
       .provide({ layerRepository });
