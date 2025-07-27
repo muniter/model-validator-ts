@@ -361,10 +361,15 @@ describe("Command API", () => {
 
     // Without providing deps, the command should throw an error
     await expect(
+      // @ts-expect-error: run is not available at the type level when deps are required
       command.run({ email: "john@example.com", name: "John Doe", age: 25 })
-    ).rejects.toThrow(
-      "Deps must be already passed, or not required at command run time"
-    );
+    ).rejects.toThrow("Deps should be provided before calling run");
+
+    // runShape should also not be available without providing deps
+    expect(
+      // @ts-expect-error: runShape is not available at the type level when deps are required
+      () => command.runShape({ email: "test@example.com", name: "Test", age: 25 })
+    ).toThrow("Deps should be provided before calling runShape");
 
     const result = await command
       .provide({ userRepository })
@@ -375,6 +380,19 @@ describe("Command API", () => {
       email: "john@example.com",
       name: "John Doe",
       age: 25,
+      createdAt: expect.any(String),
+    });
+
+    // runShape should also work when deps are provided
+    const resultShape = await command
+      .provide({ userRepository })
+      .runShape({ email: "jane@example.com", name: "Jane Doe", age: 30 });
+    assert(resultShape.success);
+    expect(resultShape.result).toMatchObject({
+      id: expect.stringMatching(/^user-\d+$/),
+      email: "jane@example.com", 
+      name: "Jane Doe",
+      age: 30,
       createdAt: expect.any(String),
     });
   });

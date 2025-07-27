@@ -291,23 +291,26 @@ export class Command<
     return new Command(newBuilder, this.#execute);
   }
 
-  async run(
-    this: Command<TSchema, TDeps, TContext, TOutput, "passed" | "not-required">,
+  run: TDepsStatus extends "required"
+    ? never
+    : (
+        input: unknown,
+        opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
+      ) => Promise<
+        CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
+      > = (async (
     input: unknown,
     opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
-  ): Promise<
-    CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-  > {
+  ) => {
     const internals = this.#validatorBuilder["~unsafeInternals"];
 
     invariant(
-      internals.schema,
-      "Schema must be defined before calling command"
+      internals.depsStatus !== "required",
+      "Deps should be provided before calling run"
     );
     invariant(
-      internals.depsStatus === "passed" ||
-        internals.depsStatus === "not-required",
-      "Deps must be already passed, or not required at command run time"
+      internals.schema,
+      "Schema must be defined before calling command"
     );
 
     const validation = await this.#validatorBuilder.validate(input, opts);
@@ -346,17 +349,28 @@ export class Command<
       result: executeResult as Exclude<TOutput, ErrorBag<any> | void>,
       context: validation.context,
     };
-  }
+  }) as any;
 
-  runShape(
-    this: Command<TSchema, TDeps, TContext, TOutput, "passed" | "not-required">,
+  runShape: TDepsStatus extends "required"
+    ? never
+    : (
+        input: StandardSchemaV1.InferInput<TSchema>,
+        opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
+      ) => Promise<
+        CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
+      > = ((
     input: StandardSchemaV1.InferInput<TSchema>,
     opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
-  ): Promise<
-    CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-  > {
+  ) => {
+    const internals = this.#validatorBuilder["~unsafeInternals"];
+    
+    invariant(
+      internals.depsStatus !== "required",
+      "Deps should be provided before calling runShape"
+    );
+    
     return this.run(input, opts);
-  }
+  }) as any;
 }
 type FluentValidatorBuilderState<
   TSchema extends StandardSchemaV1,
