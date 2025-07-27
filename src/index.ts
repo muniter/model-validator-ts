@@ -309,6 +309,17 @@ export class Command<
     return this.run(input, opts);
   }
 }
+type FluentValidatorBuilderConfig<
+  TSchema extends StandardSchemaV1,
+  TDeps extends TValidationDeps,
+  TContext
+> = {
+  schema?: TSchema;
+  deps?: TDeps;
+  contextRules?: Array<ContextRuleDefinition<any, any, any, any>>;
+  depsStatus?: DepsStatus;
+};
+
 export class FluentValidatorBuilder<
   TSchema extends StandardSchemaV1 = any,
   TDeps extends TValidationDeps = {},
@@ -319,16 +330,25 @@ export class FluentValidatorBuilder<
   #deps?: TDeps;
   #contextRules: Array<
     ContextRuleDefinition<TSchema, TDeps, TContext, TContext>
-  > = [];
-  #depsStatus: DepsStatus = "not-required";
+  >;
+  #depsStatus: DepsStatus;
+
+  constructor(config: FluentValidatorBuilderConfig<TSchema, TDeps, TContext> = {}) {
+    this.#schema = config.schema;
+    this.#deps = config.deps;
+    this.#contextRules = config.contextRules || [];
+    this.#depsStatus = config.depsStatus || "not-required";
+  }
 
   input<T extends StandardSchemaV1>(
     schema: T
   ): FluentValidatorBuilder<T, TDeps, TContext, TDpesStatus> {
-    return new FluentValidatorBuilder<T, TDeps, TContext, TDpesStatus>()
-      .setSchema(schema)
-      .setDeps(this.#deps)
-      .setRules(this.#contextRules);
+    return new FluentValidatorBuilder<T, TDeps, TContext, TDpesStatus>({
+      schema,
+      deps: this.#deps,
+      contextRules: this.#contextRules,
+      depsStatus: this.#depsStatus,
+    });
   }
 
   $deps<T extends TValidationDeps>(): FluentValidatorBuilder<
@@ -337,32 +357,11 @@ export class FluentValidatorBuilder<
     TContext,
     "required"
   > {
-    return new FluentValidatorBuilder<TSchema, T, TContext, "required">()
-      .setSchema(this.#schema)
-      .setDepsStatus("required")
-      .setRules(this.#contextRules);
-  }
-
-  private setDepsStatus(depsStatus: DepsStatus): this {
-    this.#depsStatus = depsStatus;
-    return this;
-  }
-
-  private setSchema(schema?: TSchema): this {
-    this.#schema = schema;
-    return this;
-  }
-
-  private setDeps(deps?: TDeps): this {
-    this.#deps = deps;
-    return this;
-  }
-
-  private setRules(
-    rules: Array<{ fn: (args: any) => any | Promise<any> }>
-  ): this {
-    this.#contextRules = rules;
-    return this;
+    return new FluentValidatorBuilder<TSchema, T, TContext, "required">({
+      schema: this.#schema,
+      contextRules: this.#contextRules,
+      depsStatus: "required",
+    });
   }
 
   get ["~unsafeInternals"](): {
@@ -437,22 +436,24 @@ export class FluentValidatorBuilder<
         ? TContext
         : Prettify<TContext & NonVoidReturnContext<TReturn>>,
       TDpesStatus
-    >()
-      .setSchema(this.#schema)
-      .setDeps(this.#deps)
-      .setDepsStatus(this.#depsStatus)
-      .setRules([...this.#contextRules, rule]);
+    >({
+      schema: this.#schema,
+      deps: this.#deps,
+      contextRules: [...this.#contextRules, rule],
+      depsStatus: this.#depsStatus,
+    });
   }
 
   provide(
     this: FluentValidatorBuilder<TSchema, TDeps, TContext, "required">,
     deps: TDeps
   ): FluentValidatorBuilder<TSchema, TDeps, TContext, "passed"> {
-    return new FluentValidatorBuilder<TSchema, TDeps, TContext, "passed">()
-      .setSchema(this.#schema)
-      .setDeps(deps)
-      .setDepsStatus("passed")
-      .setRules(this.#contextRules);
+    return new FluentValidatorBuilder<TSchema, TDeps, TContext, "passed">({
+      schema: this.#schema,
+      deps,
+      contextRules: this.#contextRules,
+      depsStatus: "passed",
+    });
   }
 
   command<TOutput>(args: {

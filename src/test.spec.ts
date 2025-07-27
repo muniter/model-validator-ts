@@ -116,7 +116,6 @@ describe("Fluent Validator methods", () => {
     });
 
     const result = await command
-      // FIX: Here provide should be required, and there, run should not exist since we have not passed the desp before
       .provide({ layerRepository })
       .run({ name: "John" });
     assert(result.validated);
