@@ -44,9 +44,9 @@ describe("Fluent Validator methods", () => {
     });
 
     expect(
-      // @ts-expect-error - Deps are not provided, depsStatus is required so the .validate method should not be available at the type level
+      // @ts-expect-error - validate method should not be available when deps are required
       () => validator.validate({ name: "John" })
-    ).toThrow("Deps must be passed or not required at validation time");
+    ).toThrow("Deps should be provided before calling validate");
   });
 
   test("Validator with deps can be called after providing deps", async () => {

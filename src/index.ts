@@ -230,6 +230,85 @@ type Prettify<T> = {
 } & {};
 
 type DepsStatus = "not-required" | "required" | "passed";
+
+export class Command<
+  TSchema extends StandardSchemaV1,
+  TDeps extends TValidationDeps,
+  TContext,
+  TOutput,
+  TDepsStatus extends DepsStatus
+> {
+  #validatorBuilder: FluentValidatorBuilder<TSchema, TDeps, TContext, TDepsStatus>;
+  #execute: (params: {
+    data: StandardSchemaV1.InferOutput<TSchema>;
+    deps: TDeps;
+    context: TContext;
+  }) => Promise<TOutput> | TOutput;
+
+  constructor(
+    validatorBuilder: FluentValidatorBuilder<TSchema, TDeps, TContext, TDepsStatus>,
+    execute: (params: {
+      data: StandardSchemaV1.InferOutput<TSchema>;
+      deps: TDeps;
+      context: TContext;
+    }) => Promise<TOutput> | TOutput
+  ) {
+    this.#validatorBuilder = validatorBuilder;
+    this.#execute = execute;
+  }
+
+  provide(
+    this: Command<TSchema, TDeps, TContext, TOutput, "required">,
+    deps: TDeps
+  ): Command<TSchema, TDeps, TContext, TOutput, "passed"> {
+    const newBuilder = this.#validatorBuilder.provide(deps);
+    return new Command(newBuilder, this.#execute);
+  }
+
+  async run(
+    this: Command<TSchema, TDeps, TContext, TOutput, "passed" | "not-required">,
+    input: unknown,
+    opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
+  ): Promise<CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>> {
+    const internals = this.#validatorBuilder["~unsafeInternals"];
+    
+    invariant(internals.schema, "Schema must be defined before calling command");
+    invariant(
+      internals.depsStatus === "passed" || internals.depsStatus === "not-required",
+      "Deps must be already passed, or not required at command run time"
+    );
+
+    const validation = await this.#validatorBuilder.validate(input, opts);
+
+    if (!validation.success) {
+      return { validated: false, errors: validation.errors };
+    }
+
+    const executeResult = await this.#execute({
+      data: validation.value,
+      deps: internals.deps!,
+      context: validation.context,
+    });
+
+    if (executeResult instanceof ErrorBag) {
+      return { validated: false, errors: executeResult };
+    }
+
+    return {
+      validated: true,
+      result: executeResult,
+      context: validation.context,
+    };
+  }
+
+  runShape(
+    this: Command<TSchema, TDeps, TContext, TOutput, "passed" | "not-required">,
+    input: StandardSchemaV1.InferInput<TSchema>,
+    opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
+  ): Promise<CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>> {
+    return this.run(input, opts);
+  }
+}
 export class FluentValidatorBuilder<
   TSchema extends StandardSchemaV1 = any,
   TDeps extends TValidationDeps = {},
@@ -302,29 +381,28 @@ export class FluentValidatorBuilder<
     };
   }
 
-  validate(
-    this: FluentValidatorBuilder<
-      TSchema,
-      TDeps,
-      TContext,
-      "passed" | "not-required"
-    >,
+  validate: TDpesStatus extends "required"
+    ? never
+    : (
+        input: unknown,
+        opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
+      ) => Promise<
+        | {
+            success: true;
+            value: StandardSchemaV1.InferOutput<TSchema>;
+            context: TContext;
+          }
+        | {
+            success: false;
+            errors: ErrorBag<StandardSchemaV1.InferInput<TSchema>>;
+          }
+      > = ((
     input: unknown,
     opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
-  ): Promise<
-    | {
-        success: true;
-        value: StandardSchemaV1.InferOutput<TSchema>;
-        context: TContext;
-      }
-    | {
-        success: false;
-        errors: ErrorBag<StandardSchemaV1.InferInput<TSchema>>;
-      }
-  > {
+  ) => {
     invariant(
-      this.#depsStatus === "passed" || this.#depsStatus === "not-required",
-      "Deps must be passed or not required at validation time"
+      this.#depsStatus !== "required",
+      "Deps should be provided before calling validate"
     );
     invariant(this.#schema, "Schema must be defined before calling validate");
 
@@ -335,7 +413,7 @@ export class FluentValidatorBuilder<
       opts,
       deps: this.#deps ?? {},
     });
-  }
+  }) as any;
 
   addRule<TReturn>(
     rule: ContextRuleDefinition<
@@ -383,113 +461,8 @@ export class FluentValidatorBuilder<
       deps: TDeps;
       context: TContext;
     }) => Promise<TOutput> | TOutput;
-  }): TDpesStatus extends "required"
-    ? {
-        provide: (deps: TDeps) => {
-          runShape: (
-            input: StandardSchemaV1.InferInput<TSchema>,
-            opts?: ValidationOpts<TSchema>
-          ) => Promise<
-            CommandResult<
-              TOutput,
-              StandardSchemaV1.InferInput<TSchema>,
-              TContext
-            >
-          >;
-          run: (
-            input: unknown,
-            opts?: ValidationOpts<TSchema>
-          ) => Promise<
-            CommandResult<
-              TOutput,
-              StandardSchemaV1.InferInput<TSchema>,
-              TContext
-            >
-          >;
-        };
-      }
-    : {
-        runShape: (
-          input: StandardSchemaV1.InferInput<TSchema>,
-          opts?: ValidationOpts<TSchema>
-        ) => Promise<
-          CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-        >;
-        run: (
-          input: unknown,
-          opts?: ValidationOpts<TSchema>
-        ) => Promise<
-          CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-        >;
-      } {
-    const executeCommand = async (
-      input: unknown,
-      opts: ValidationOpts<StandardSchemaV1.InferInput<TSchema>> | undefined,
-      deps: TDeps
-    ): Promise<
-      CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
-    > => {
-      invariant(this.#schema, "Schema must be defined before calling command");
-      invariant(
-        this.#depsStatus === "passed" || this.#depsStatus === "not-required",
-        "Deps must be already passed, or not required at command run time"
-      );
-
-      // @ts-expect-error - This error is fine, typescript can't know
-      // that we already checked that the deps are passed or not required
-      const validation = await this.validate(input, opts);
-      if (!validation.success) {
-        return { validated: false, errors: validation.errors };
-      }
-
-      const executeResult = await args.execute({
-        data: validation.value,
-        deps,
-        context: validation.context,
-      });
-
-      if (executeResult instanceof ErrorBag) {
-        return { validated: false, errors: executeResult };
-      }
-
-      return {
-        validated: true,
-        result: executeResult,
-        context: validation.context,
-      };
-    };
-
-    if (this.#depsStatus === "passed" || this.#depsStatus === "not-required") {
-      return {
-        run: async (input: unknown, opts?: ValidationOpts<TSchema>) => {
-          return executeCommand(input, opts, this.#deps!);
-        },
-        runShape: (
-          input: StandardSchemaV1.InferInput<TSchema>,
-          opts?: ValidationOpts<TSchema>
-        ) => {
-          return executeCommand(input, opts, this.#deps!);
-        },
-      } as any;
-    } else {
-      return {
-        provide: (deps: TDeps) => {
-          this.setDeps(deps);
-          this.setDepsStatus("passed");
-          return {
-            runShape: (
-              input: StandardSchemaV1.InferInput<TSchema>,
-              opts?: ValidationOpts<TSchema>
-            ) => {
-              return executeCommand(input, opts, deps);
-            },
-            run: async (input: unknown, opts?: ValidationOpts<TSchema>) => {
-              return executeCommand(input, opts, deps);
-            },
-          };
-        },
-      } as any;
-    }
+  }): Command<TSchema, TDeps, TContext, TOutput, TDpesStatus> {
+    return new Command(this, args.execute);
   }
 }
 
