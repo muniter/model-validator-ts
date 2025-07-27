@@ -2,16 +2,18 @@
 
 [![npm version](https://img.shields.io/npm/v/model-validator-ts.svg)](https://www.npmjs.com/package/model-validator-ts)
 
-🔒 A type-safe validation library for TypeScript that helps you validate data with complex business rules and dependencies 🚀
+A type-safe validation library for TypeScript that provides a fluent API for creating validators with business rules and dependency injection. Built on top of the Standard Schema specification.
 
 ## Features
 
-- 🔒 100% Type-safe validation with TypeScript
-- 📦 Support for multiple schema libraries ([Standard Schema](https://standardschema.dev/)) (Zod, Valibot, ArkType)
-- 🔄 Complex business rules with dependencies
-- 🏗️ Command pattern support for validation + execution
-- 📝 Clear error messages and error handling
-- 🎯 Static and runtime dependency injection
+- **Type-safe validation** with full TypeScript support
+- **Standard Schema support** - works with Zod (and other compatible libraries)
+- **Fluent API** - chainable methods for building validators
+- **Business rules** with context passing between rules
+- **Command pattern** - validation + execution in one step
+- **Dependency injection** with compile-time type checking
+- **Multiple error formats** - object, flatten, HTML, text
+- **Efficient object reuse** - same instance, different types
 
 ## Installation
 
@@ -25,94 +27,243 @@ pnpm add model-validator-ts
 
 ## Quick Start
 
+### Basic Validation
+
 ```typescript
-import { createValidatorBuilder, createCommand } from 'model-validator-ts';
-import { z } from 'zod'; // or any other schema library compatible with Standard Schema
+import { createValidator } from 'model-validator-ts';
+import { z } from 'zod';
 
-// First we create what will help us define the validator, we can pass static/whole app dependencies here
-// like db, cache, logger, etc. This is done once for your whole app.
-const AppValidatorDefinition = createValidatorBuilder({
-    deps: {
-        db: myDatabase,
-        cache: myCache,
-        logger: logger,
-    }
+const userSchema = z.object({
+  name: z.string().min(3),
+  age: z.number().min(18),
+  email: z.string().email()
 });
 
-// Create a validator for user creation
-const userValidator = AppValidatorDefinition({
-    // Define your schema using Standard Schema Zod, Valibot, ArkType, etc.
-    schema: z.object({
-        email: z.string().email(),
-        age: z.number().min(18),
-    }),
-    // Define the dependencies, you only pass a type they are passed when you build the validator
-    deps: {} as { emailService: { isEmailBlacklisted: (email: string) => Promise<boolean> } },
-    rules: [
-        {
-            // All the attributes names, dependencies, data, builder are type safe
-            attribute: 'email',
-            fn: async ({ data, deps, builder }) => {
-                if (await deps.db.users.findByEmail(data.email)) {
-                    builder.addError('email', 'Email is already taken');
-                }
-                if (await deps.emailService.isEmailBlacklisted(data.email)) {
-                    builder.addError('email', 'Email is blacklisted');
-                }
-            }
-        },
-    ]
-});
+// Simple validation without dependencies
+const validator = createValidator().input(userSchema);
 
-// Use the validator, but first build it passing the dependencies (Checked by TypeScript) 
-// see that db, cache, logger are not passed they are already in the AppValidatorDefinition
-const result = await userValidator.build({
-    emailService: myEmailService
-}).validate({
-    email: 'user@example.com',
-    age: 25
+const result = await validator.validate({
+  name: "John",
+  age: 25,
+  email: "john@example.com"
 });
 
 if (result.success) {
-    console.log(`Validation passed, ${result.value.email} is ${result.value.age} years old`);
+  console.log("Valid user:", result.value);
+  console.log("Context:", result.context);
 } else {
-    console.log(`Validation failed`);
-    if (result.errors.firstError('email')) {
-        console.log("Email field invalid:", result.errors.firstError('email'));
-    }
-    // Or log the whole object
-    console.log(result.errors.toFlattenObject());
+  console.log("Validation errors:", result.errors.toObject);
+}
+```
+
+### With Dependencies and Business Rules
+
+```typescript
+interface UserRepository {
+  findByEmail(email: string): Promise<{ id: string } | null>;
 }
 
-// Now let's use the command helper, which mixes the validator with the execution logic
-const createUserCommand = createCommand({
-    validator: userValidator,
-    deps: {
-        emailService: myEmailService,
-    },
-    execute: async ({ data, deps }) => {
-        // Now you can be completely sure that the data has been validated 
-        // by it's shape (schema) but also by the rules (business logic)
-        // and all dependencies are available
-        const user = await deps.db.users.create(data);
-        return user;
+const userValidator = createValidator()
+  .input(userSchema)
+  .$deps<{ userRepo: UserRepository }>()
+  .addRule({
+    fn: async ({ data, deps, bag }) => {
+      // Check if email is already taken
+      const existingUser = await deps.userRepo.findByEmail(data.email);
+      if (existingUser) {
+        bag.addError("email", "Email is already taken");
+      }
     }
-});
+  })
+  .provide({ userRepo: myUserRepository });
 
-// Example usage in an API endpoint
-app.post({
-    path: '/users',
-    schema: createUserCommand.validator.schema,
-    handler: async (req, res) => {
-        const data = req.body;
-        const result = await createUserCommand.run(data);
-        if (result.validated) {
-            res.status(200).json(result.result);
-        } else {
-            res.status(400).json(result.errors.toFlattenObject());
-        }
+const result = await userValidator.validate(userData);
+```
+
+### Context Passing Between Rules
+
+```typescript
+const layerValidator = createValidator()
+  .input(z.object({
+    layerId: z.string(),
+    visibility: z.enum(["public", "private"])
+  }))
+  .$deps<{ layerRepo: LayerRepository }>()
+  .addRule({
+    fn: async ({ data, deps, bag }) => {
+      const layer = await deps.layerRepo.getLayer(data.layerId);
+      if (!layer) {
+        bag.addError("layerId", "Layer not found");
+        return;
+      }
+      // Return context for next rules
+      return { context: { layer } };
     }
-});
+  })
+  .addRule({
+    fn: async ({ data, context, bag }) => {
+      // Access context from previous rule
+      if (context.layer.classification === "confidential" && 
+          data.visibility === "public") {
+        bag.addError("visibility", "Confidential layers cannot be public");
+      }
+      return { context: { validated: true } };
+    }
+  })
+  .provide({ layerRepo });
+```
+
+### Command Pattern for Validation + Execution
+
+```typescript
+const transferMoneyCommand = createValidator()
+  .input(z.object({
+    fromAccount: z.string(),
+    toAccount: z.string(),
+    amount: z.number().positive()
+  }))
+  .$deps<{ db: DatabaseService }>()
+  .addRule({
+    fn: async ({ data, bag }) => {
+      // Business rule validation
+      if (data.fromAccount === data.toAccount) {
+        bag.addError("toAccount", "Cannot transfer to same account");
+      }
+    }
+  })
+  .command({
+    execute: async ({ data, deps, context, bag }) => {
+      try {
+        // Execute the business logic
+        await deps.db.executeTransaction(async () => {
+          await deps.db.debit(data.fromAccount, data.amount);
+          await deps.db.credit(data.toAccount, data.amount);
+        });
+
+        return {
+          transactionId: `txn-${Date.now()}`,
+          status: "completed",
+          ...data
+        };
+      } catch (error) {
+        // Handle runtime errors
+        bag.addError("global", `Transaction failed: ${error.message}`);
+        return bag; // Return error bag
+      }
+    }
+  });
+
+// Execute command
+const result = await transferMoneyCommand
+  .provide({ db: databaseService })
+  .run({
+    fromAccount: "acc-123",
+    toAccount: "acc-456", 
+    amount: 100
+  });
+
+if (result.success) {
+  console.log("Transfer successful:", result.result);
+  console.log("Context:", result.context);
+} else {
+  console.log("Transfer failed at step:", result.step); // "validation" | "execution"
+  console.log("Errors:", result.errors.toText());
+}
+```
+
+## API Reference
+
+### FluentValidatorBuilder
+
+#### `.input(schema)`
+Define the input schema using any Standard Schema compatible library.
+
+#### `.$deps<T>()`
+Declare the required dependencies type. Must be called before `.provide()`.
+
+#### `.addRule({ fn })`
+Add a business rule function. Rules can:
+- Add errors to the error bag
+- Return context: `{ context: { key: value } }`
+- Access previous context and dependencies
+
+#### `.provide(deps)`
+Provide the actual dependency instances. Required before validation if `$deps()` was called.
+
+#### `.validate(input, opts?)`
+Run validation and return result with `success`, `value`/`errors`, and `context`.
+
+#### `.command({ execute })`
+Create a command that combines validation with execution logic.
+
+### Command
+
+#### `.provide(deps)`
+Provide dependencies for command execution.
+
+#### `.run(input, opts?)`
+Execute the command with validation + business logic.
+
+#### `.runShape(input, opts?)`
+Type-safe version when input type is known.
+
+### ErrorBag
+
+#### `.addError(key, message)`
+Add an error for a specific field or "global".
+
+#### `.hasErrors()`
+Check if any errors exist.
+
+#### `.firstError(key)`
+Get the first error message for a field.
+
+#### `.toObject`
+Get errors as `{ field: ["error1", "error2"] }`.
+
+#### `.toFlattenObject()`
+Get errors as `{ field: "error1" }` (first error only).
+
+#### `.toText()` / `.toHtml()`
+Format errors as text or HTML.
+
+## Error Handling
+
+Validation results include a `step` field to distinguish between:
+- `"validation"` - Schema or business rule validation failed
+- `"execution"` - Runtime error during command execution
+
+```typescript
+const result = await command.run(input);
+
+if (!result.success) {
+  if (result.step === "validation") {
+    // Handle validation errors
+    console.log("Input validation failed:", result.errors.toObject);
+  } else {
+    // Handle execution errors  
+    console.log("Execution failed:", result.errors.toObject);
+  }
+}
+```
+
+## Type Safety
+
+- **Schema types** are automatically inferred from your schema
+- **Dependencies** must be provided before validation/execution
+- **Context types** accumulate through the rule chain
+- **Command results** are properly typed based on execution function
+
+```typescript
+// TypeScript will enforce these relationships:
+const validator = createValidator()
+  .input(schema)           // Infers input/output types
+  .$deps<{ service: T }>() // Requires provide() before validate()
+  .addRule({ ... })        // Rule receives typed data, deps, context
+  .provide(dependencies);  // Type-checked against $deps<T>
+
+// result.value is typed according to schema output
+const result = await validator.validate(data);
 ```
 
 
