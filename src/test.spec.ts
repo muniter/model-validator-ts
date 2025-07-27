@@ -1,427 +1,219 @@
-import { test, expect, describe, expectTypeOf } from "vitest";
+import { test, expect, describe, assert } from "vitest";
 import { z } from "zod";
-import { ValidatorModel, ValidatorDefinition, type ErrorBag } from "./index.js"
-import { createCommand } from "./index.js"
-import { createValidatorBuilder } from "./index.js"
+import { createValidator } from "./index.js";
 
-describe("Validation Utilities", () => {
-  // Setup common test schema and types
-  const testSchema = z.object({
-    name: z.string().min(3),
-    age: z.number().min(18),
-    email: z.string().email(),
+const layerRepository = {
+  getLayer: async (id: string): Promise<{ name: string } | null> => {
+    if (id === "layer-1") {
+      return { name: "Layer 1" };
+    }
+    return null;
+  },
+};
+type LayerRepository = typeof layerRepository;
+
+describe("Fluent Validator methods", () => {
+  const testSchema = z.object({ name: z.string() });
+  test("Validator with no deps can be called with validate", async () => {
+    const validator = createValidator().input(testSchema);
+
+    expect(validator["~unsafeInternals"]).toMatchObject({
+      schema: testSchema,
+      deps: undefined,
+      depsStatus: "not-required",
+    });
+
+    const result = await validator.validate({ name: "John" });
+    assert(result.success);
+    expect(result.value).toEqual({ name: "John" });
   });
-  
-  type TestDeps = { maxAge: number };
 
-  describe("Type Tests", () => {
-    test("validator types are properly inferred", () => {
-      const validator = new ValidatorDefinition({
-        schema: testSchema,
-        rules: [],
-        deps: {} as TestDeps
-      });
-      
-      type TestOutput = z.infer<typeof testSchema>;
-      
-      validator
-        .addRule({
-          attribute: "age",
-          fn: (args) => {
-            expectTypeOf(args.deps).toEqualTypeOf<TestDeps>();
-            expectTypeOf(args.data).toEqualTypeOf<TestOutput>();
-            expectTypeOf(args.property).toEqualTypeOf<keyof TestOutput | "global">();
-            expectTypeOf(args.builder).toEqualTypeOf<ValidatorModel<typeof testSchema, TestDeps>>();
-          }
-        })
-        .addRule({
-          attribute: "name",
-          fn: () => {}
-        });
-
-      // Test that attribute must be a key of TestType
-      validator.addRule({
-        // @ts-expect-error attribute must be keyof TestType
-        attribute: "nonexistent",
-        fn: () => {}
-      });
-
-      // Test builder dependencies type
-      const builder = validator.build({ maxAge: 50 });
-      // @ts-expect-error missing maxAge
-      validator.build({});
-      // @ts-expect-error wrong type for maxAge
-      validator.build({ maxAge: "50" });
-
-      // Test validation result types
-      async () => {
-        const result = await builder.validate({
-          name: "Test",
-          age: 20,
-          email: "test@example.com"
-        });
-
-        if (result.success) {
-          expectTypeOf(result.value).toEqualTypeOf<TestOutput>();
-        } else {
-          expectTypeOf(result.errors).toEqualTypeOf<ErrorBag<typeof testSchema>>();
-        }
+  test("Validator with deps can only be called after providing deps", async () => {
+    const validator = createValidator().input(testSchema).$deps<{
+      layerRepository: {
+        getLayer: (id: string) => Promise<{ name: string } | null>;
       };
+    }>();
+
+    expect(validator["~unsafeInternals"]).toMatchObject({
+      schema: testSchema,
+      deps: undefined,
+      depsStatus: "required",
     });
 
-    test("validateShape enforces input type", () => {
-      const validator = new ValidatorDefinition({
-        schema: testSchema,
-        rules: [],
-        deps: {} as TestDeps
-      });
-      const builder = validator.build({ maxAge: 50 });
-
-      // Should accept valid TestType
-      builder.validateShape({
-        name: "Test",
-        age: 20,
-        email: "test@example.com"
-      });
-
-      // @ts-expect-error missing properties
-      builder.validateShape({
-        name: "Test"
-      });
-
-      builder.validateShape({
-        name: "Test",
-        // @ts-expect-error wrong property type
-        age: "20",
-        email: "test@example.com"
-      });
-    });
+    expect(
+      // @ts-expect-error - Deps are not provided, depsStatus is required
+      () => validator.validate({ name: "John" })
+    ).toThrow("Deps must be passed or not required at validation time");
   });
 
-  describe("Runtime Tests", () => {
-    test("validates with proper dependencies", async () => {
-      const validator = new ValidatorDefinition({
-        schema: testSchema,
-        rules: [],
-        deps: {} as TestDeps
-      });
-      
-      validator.addRule({
-        attribute: "age",
-        fn: ({ data, deps, builder }) => {
-          if (data.age > deps.maxAge) {
-            builder.addError("age", "Too old");
-          }
-        }
-      });
-
-      const builder = validator.build({ maxAge: 50 });
-      const result = await builder.validate({
-        name: "Test",
-        age: 51,
-        email: "test@example.com"
-      });
-
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.errors.firstError("age")).toBe("Too old");
-      }
-    });
-
-    test("validates with async rules", async () => {
-      const validator = new ValidatorDefinition({
-        schema: testSchema,
-        rules: [],
-        deps: {} as TestDeps
-      });
-      
-      validator.addRule({
-        attribute: "age",
-        fn: async ({ data, deps, builder }) => {
-          // Simulate an async operation
-          await new Promise(resolve => setTimeout(resolve, 10));
-          if (data.age > deps.maxAge) {
-            builder.addError("age", "Too old");
-          }
-        }
-      });
-
-      const builder = validator.build({ maxAge: 50 });
-      const result = await builder.validate({
-        name: "Test",
-        age: 51,
-        email: "test@example.com"
-      });
-
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.errors.firstError("age")).toBe("Too old");
-      }
-    });
-  });
-
-  describe("Command Tests", () => {
-    // Setup a test command schema and dependencies
-    const testCommandSchema = z.object({
-      title: z.string().min(3),
-      priority: z.number().min(1).max(5),
-    });
-
-    type TestCommandDeps = {
-      taskService: {
-        create(input: { title: string; priority: number }): Promise<{ id: string }>;
-        exists(title: string): Promise<boolean>;
+  test("Validator with deps can be called after providing deps", async () => {
+    const validator = createValidator().input(testSchema).$deps<{
+      layerRepository: {
+        getLayer: (id: string) => Promise<{ name: string } | null>;
       };
-    };
-    
-    const testDeps = {
-      taskService: {
-        async create(input: { title: string; priority: number }) {
-          return { id: "test-123", ...input };
-        },
-        async exists(title: string) {
-          title = title.toLowerCase();
-          return false;
-        },
+    }>();
+
+    expect(validator["~unsafeInternals"]).toMatchObject({
+      schema: testSchema,
+      deps: undefined,
+      depsStatus: "required",
+    });
+
+    const deps = { layerRepository };
+    const validatorWithDeps = validator.provide(deps);
+
+    expect(validatorWithDeps["~unsafeInternals"]).toMatchObject({
+      schema: testSchema,
+      deps,
+      depsStatus: "passed",
+    });
+
+    const result = await validatorWithDeps.validate({ name: "John" });
+    assert(result.success);
+    expect(result.value).toEqual({ name: "John" });
+  });
+
+  test("Command can only be called directly if no deps are required", async () => {
+    const validator = createValidator().input(testSchema);
+
+    expect(validator["~unsafeInternals"]).toMatchObject({
+      schema: testSchema,
+      deps: undefined,
+      depsStatus: "not-required",
+    });
+
+    const command = validator.command({
+      execute: async (args) => {
+        return args.data.name;
       },
-    };
-
-    const testValidator = new ValidatorDefinition({
-      schema: testCommandSchema,
-      rules: [
-        {
-          attribute: "title",
-          fn: async ({ data, deps, builder }) => {
-            if (await deps.taskService.exists(data.title)) {
-              builder.addError("title", "Task already exists");
-            }
-          },
-        },
-      ],
-      deps: {} as TestCommandDeps
-    })
-
-    test("command executes successfully with valid input", async () => {
-      const command = createCommand({
-        validator: testValidator,
-        deps: testDeps,
-        execute: async ({ data,deps }) => {
-          const result = await deps.taskService.create(data);
-          return result;
-        },
-      });
-      
-      const input = {
-        title: "Test Task",
-        priority: 3,
-      }
-
-      const result = await command.run(input);
-
-      expect(result.validated).toBe(true);
-      if (result.validated) {
-        expect(result.result).toEqual({ id: "test-123", ...input });
-      }
     });
 
-    test("command fails validation with invalid input", async () => {
-      const command = createCommand({
-        validator: testValidator,
-        deps: testDeps,
-        execute: async ({ data, deps }) => {
-          const result = await deps.taskService.create(data);
-          return result;
-        },
-      });
-
-      const result = await command.run({
-        title: "Te", // Too short
-        priority: 3,
-      });
-
-      expect(result.validated).toBe(false);
-      if (!result.validated) {
-        expect(result.errors.firstError("title")).toBeDefined();
-      }
-    });
-
-    test("command fails validation when business rule fails", async () => {
-      const command = createCommand({
-        validator: testValidator,
-        deps: {
-          taskService: {
-            ...testDeps.taskService,
-            exists: async () => {
-              return true;
-            }
-          }
-        },
-        execute: async ({ data, deps }) => {
-          const result = await deps.taskService.create(data);
-          return result;
-        },
-      });
-
-      const result = await command.run({
-        title: "Test Task",
-        priority: 3,
-      });
-
-      expect(result.validated).toBe(false);
-      if (!result.validated) {
-        expect(result.errors.firstError("title")).toBe("Task already exists");
-      }
-    });
-
-    test("execute function receives validated data", async () => {
-      let executedData: unknown;
-
-      const command = createCommand({
-        validator: testValidator,
-        deps: testDeps,
-        execute: async ({ data, deps }) => {
-          executedData = data;
-          return deps.taskService.create(data);
-        },
-      });
-
-      const result = await command.run({
-        title: "Test Task",
-        priority: 3,
-      });
-      
-      expect(result.validated).toBe(true);
-      // Check the types
-      if (result.validated) {
-        expectTypeOf(result.result).toEqualTypeOf<{ id: string }>();
-      }
-
-      expect(executedData).toEqual({
-        title: "Test Task",
-        priority: 3,
-      });
-    });
-
-    test("type tests", () => {
-      createCommand({
-        validator: testValidator,
-        deps: testDeps,
-        execute: async ({ data, deps }) => {
-          // Type checks for data
-          expectTypeOf(data.title).toBeString();
-          expectTypeOf(data.priority).toBeNumber();
-          
-          // Type checks for deps
-          expectTypeOf(deps.taskService.create).toBeFunction();
-          expectTypeOf(deps.taskService.exists).toBeFunction();
-
-          return deps.taskService.create(data);
-        },
-      });
-
-    });
+    const result = await command.run({ name: "John" });
+    assert(result.validated);
+    expect(result.result).toEqual("John");
   });
 
-  describe("Validator Builder Tests", () => {
-    test("creates validator with pre-build dependencies", () => {
-      const AppValidatorDefinition = createValidatorBuilder({
-        deps: {
-          db: {
-            query: (sql: string) => Promise.resolve({ rows: [{ id: "1" }] }),
-            getUser: (name: string) => Promise.resolve({ id: "1", name })
-          }
-        }
-      });
+  test("Command can be called after providing deps", async () => {
+    const validator = createValidator()
+      .input(testSchema)
+      .$deps<{
+        layerRepository: {
+          getLayer: (id: string) => Promise<{ name: string } | null>;
+        };
+      }>()
 
-      const CreateUserValidator = AppValidatorDefinition({
-        schema: z.object({
-          name: z.string(),
-          email: z.string().email(),
-          password: z.string().min(8),
-        }),
-        rules: [
-          {
-            attribute: "name",
-            fn: async (args) => {
-              const { db, logger } = args.deps;
-              logger.log("Checking if user exists");
-              const user = await db.getUser(args.data.name);
-              if (user) {
-                args.builder.addError("name", "User already exists");
-              }
-            }
-          }
-        ],
-        deps: {} as { logger: { log: (message: string) => void } }
-      });
-
-      // Test type inference
-      expectTypeOf(CreateUserValidator.build).toBeFunction();
-      const validator = CreateUserValidator.build({ logger: console });
-      expectTypeOf(validator).toBeObject();
-      expectTypeOf(validator.errors).toBeObject();
-      expectTypeOf(validator.errors.addError).toBeFunction();
+    expect(validator["~unsafeInternals"]).toMatchObject({
+      schema: testSchema,
+      deps: undefined,
+      depsStatus: "required",
     });
 
-    test("validator builder with empty dependencies", () => {
-      const SimpleValidatorDefinition = createValidatorBuilder({});
-      
-      const SimpleValidator = SimpleValidatorDefinition({
-        schema: z.object({
-          name: z.string(),
-        }),
-        rules: [
-          {
-            attribute: "name",
-            fn: (args) => {
-              args.builder.addError("name", "Test error");
-            }
-          }
-        ],
-        deps: {} as Record<string, never>
-      });
-
-      // Should allow building without dependencies
-      const validator = SimpleValidator.build();
-      expectTypeOf(validator).toBeObject();
-      expectTypeOf(validator.errors).toBeObject();
-      expectTypeOf(validator.errors.addError).toBeFunction();
+    const command = validator.command({
+      execute: async (args) => {
+        return args.data.name;
+      },
     });
 
-    test("validator builder with function dependencies", () => {
-      const AppValidatorDefinition = createValidatorBuilder({
-        deps: () => ({
-          db: {
-            query: (sql: string) => Promise.resolve({ rows: [{ id: "1", sql }] }),
-            getUser: (name: string) => Promise.resolve({ id: "1", name })
-          }
-        })
-      });
+    const result = await command
+      .provide({ layerRepository })
+      .run({ name: "John" });
+    assert(result.validated);
+    expect(result.result).toEqual("John");
+  });
+});
 
-      const CreateUserValidator = AppValidatorDefinition({
-        schema: z.object({
-          name: z.string(),
-          email: z.string().email(),
-        }),
-        rules: [
-          {
-            attribute: "name",
-            fn: async (args) => {
-              const { db } = args.deps;
-              const user = await db.getUser(args.data.name);
-              if (user) {
-                args.builder.addError("name", "User exists");
-              }
-            }
-          }
-        ],
-        deps: {} as { logger: { log: (message: string) => void } }
-      });
-
-      const validator = CreateUserValidator.build({ logger: console });
-      expectTypeOf(validator).toBeObject();
-      expectTypeOf(validator.errors).toBeObject();
-      expectTypeOf(validator.errors.addError).toBeFunction();
+describe("Fluent Validator with Context", () => {
+  test("can pass context between rules", async () => {
+    const updateLayerVisibilitySchema = z.object({
+      layerId: z.string(),
+      visibility: z.enum(["public", "private"]),
     });
+
+    const upateLayerValidatorDefinition = createValidator()
+      .input(updateLayerVisibilitySchema)
+      .$deps<{
+        layerRepository: LayerRepository;
+      }>()
+      .addRule({
+        fn: async (args) => {
+          const layer = await args.deps.layerRepository.getLayer(
+            args.data.layerId
+          );
+          if (!layer) {
+            return args.bag.addError("layerId", "Layer not found");
+          }
+          return { layer };
+        },
+      })
+      .addRule({
+        fn: async (args) => {
+          expect(args.context).toBeDefined();
+          const layer = args.context.layer;
+          if (
+            layer.classification === "confidential" &&
+            args.data.visibility === "public"
+          ) {
+            return args.bag.addError(
+              "visibility",
+              "Layers with confidential classification cannot be public visibility"
+            );
+          }
+        },
+      })
+      .provide({ layerRepository });
+
+    const input = {
+      layerId: "layer-1",
+      visibility: "public",
+    };
+    const result = await upateLayerValidatorDefinition.validate(input);
+    assert(result.success);
+    expect(result.value).toEqual(input);
+  });
+
+  test("schema validation works", async () => {
+    const schema = z.object({
+      name: z.string().min(3),
+      age: z.number().min(18),
+    });
+
+    const commandDefinition = createValidator()
+      .input(schema)
+      .command({
+        execute: async (args) => {
+          return { id: "123", ...args.data };
+        },
+      });
+
+    // Test with invalid input (name too short)
+    const result1 = await commandDefinition.run({
+      name: "ab",
+      age: 20,
+    });
+    expect(result1.validated).toBe(false);
+    if (!result1.validated) {
+      expect(result1.errors.firstError("name")).toContain("3");
+    }
+
+    // Test with invalid input (age too low)
+    const result2 = await commandDefinition.run({
+      name: "John",
+      age: 17,
+    });
+    expect(result2.validated).toBe(false);
+    if (!result2.validated) {
+      expect(result2.errors.firstError("age")).toContain("18");
+    }
+
+    // Test with valid input
+    const result3 = await commandDefinition.run({
+      name: "John",
+      age: 25,
+    });
+    expect(result3.validated).toBe(true);
+    if (result3.validated) {
+      expect(result3.result).toEqual({ id: "123", name: "John", age: 25 });
+    }
   });
 });
