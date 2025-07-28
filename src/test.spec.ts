@@ -10,6 +10,9 @@ const userRepository = {
     if (email === "existing@example.com") {
       return { id: "user-123", email };
     }
+    if (email === "newemail@example.com") {
+      return { id: "user-456", email };
+    }
     return null;
   },
   findUserById: async (
@@ -225,12 +228,29 @@ describe("Context Passing & Rule Chain", () => {
         description: "Check if new email is already taken",
         fn: async (args) => {
           expect(args.context.user).toBeDefined();
-          if (args.context.user && args.context.user.id !== args.data.userId) {
-            return args.bag.addError(
-              "newEmail",
-              "Email already taken by another user"
-            );
+          
+          // Check if the new email is already in use
+          const existingUserWithEmail = await args.deps.userRepository.findUserByEmail(
+            args.data.newEmail
+          );
+          
+          if (existingUserWithEmail) {
+            if (existingUserWithEmail.id === args.data.userId) {
+              // User is trying to update to their current email - no change needed
+              return args.bag.addError(
+                "newEmail",
+                "New email is the same as current email"
+              );
+            } else {
+              // Email is taken by another user
+              return args.bag.addError(
+                "newEmail",
+                "Email already taken by another user"
+              );
+            }
           }
+          
+          // Email is available for use
         },
       })
       .addRule({
@@ -271,7 +291,7 @@ describe("Context Passing & Rule Chain", () => {
     // Test successful case
     const input = {
       userId: "user-456",
-      newEmail: "newemail@example.com",
+      newEmail: "fresh@example.com", // This email is not taken by anyone
     };
     const result = await updateEmailValidatorDefinition.validate(input);
     assert(result.success);
@@ -303,6 +323,28 @@ describe("Context Passing & Rule Chain", () => {
     assert(!failNoExists.success);
     expect(failNoExists.errors.firstError("userId")).toBe("User not found");
     expect(failNoExists.rule?.id).toBe("user-exists-check");
+
+    // Test failure case when trying to use an email that's already taken by another user
+    const failEmailTaken = await updateEmailValidatorDefinition.validate({
+      userId: "user-456",
+      newEmail: "existing@example.com", // This email is already taken by user-123
+    });
+    assert(!failEmailTaken.success);
+    expect(failEmailTaken.errors.firstError("newEmail")).toBe(
+      "Email already taken by another user"
+    );
+    expect(failEmailTaken.rule?.description).toBe("Check if new email is already taken");
+
+    // Test failure case when user tries to update to their current email (no change)
+    const sameEmailResult = await updateEmailValidatorDefinition.validate({
+      userId: "user-456",
+      newEmail: "newemail@example.com", // This is the current email for user-456
+    });
+    assert(!sameEmailResult.success);
+    expect(sameEmailResult.errors.firstError("newEmail")).toBe(
+      "New email is the same as current email"
+    );
+    expect(sameEmailResult.rule?.description).toBe("Check if new email is already taken");
   });
 });
 
