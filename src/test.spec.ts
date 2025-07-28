@@ -160,7 +160,7 @@ describe("Schema Validation", () => {
       .input(schema)
       .command({
         execute: async (args) => {
-          return { id: "123", ...args.data };
+          return "ok";
         },
       });
 
@@ -188,7 +188,7 @@ describe("Schema Validation", () => {
       age: 25,
     });
     assert(result3.success);
-    expect(result3.result).toEqual({ id: "123", name: "John", age: 25 });
+    expect(result3.result).toEqual("ok");
   });
 });
 
@@ -225,12 +225,24 @@ describe("Context Passing & Rule Chain", () => {
         description: "Check if new email is already taken",
         fn: async (args) => {
           expect(args.context.user).toBeDefined();
-          if (args.context.user && args.context.user.id !== args.data.userId) {
-            return args.bag.addError(
-              "newEmail",
-              "Email already taken by another user"
-            );
+          const userByEmail = await args.deps.userRepository.findUserByEmail(
+            args.data.newEmail
+          );
+          if (userByEmail) {
+            if (userByEmail.id === args.data.userId) {
+              return args.bag.addError(
+                "newEmail",
+                "You are already using this email address"
+              );
+            } else {
+              return args.bag.addError("newEmail", "Email already taken");
+            }
           }
+          return {
+            context: {
+              emailChecked: true,
+            },
+          };
         },
       })
       .addRule({
@@ -238,6 +250,7 @@ describe("Context Passing & Rule Chain", () => {
         description: "Check if new email is blacklisted",
         fn: async (args) => {
           expect(args.context.user).toBeDefined();
+          expect(args.context.emailChecked).toBe(true);
           const isBlacklisted =
             await args.deps.userRepository.isEmailBlacklisted(
               args.data.newEmail
@@ -245,24 +258,18 @@ describe("Context Passing & Rule Chain", () => {
           if (isBlacklisted) {
             return args.bag.addError("newEmail", "Email domain is not allowed");
           }
-          return { context: { validationToken: "abc123" } };
         },
       })
       .addRule({
+        description: "Superfluous rule to test context",
         fn: async (args) => {
           expect(args.context).toBeDefined();
-          const validationToken = args.context.validationToken;
-          const user = args.context.user;
-
-          expect({
-            validationToken,
-            user,
-          }).toMatchObject({
+          expect(args.context).toMatchObject({
             user: expect.objectContaining({
               id: expect.any(String),
               email: expect.any(String),
             }),
-            validationToken: "abc123",
+            emailChecked: true,
           } as const);
         },
       })
@@ -277,7 +284,7 @@ describe("Context Passing & Rule Chain", () => {
     assert(result.success);
     expect(result.context).toMatchObject({
       user: { id: "user-456", email: "newemail@example.com" },
-      validationToken: "abc123",
+      emailChecked: true,
     });
     expect(result.value).toEqual(input);
 
@@ -368,7 +375,8 @@ describe("Command API", () => {
     // runShape should also not be available without providing deps
     expect(
       // @ts-expect-error: runShape is not available at the type level when deps are required
-      () => command.runShape({ email: "test@example.com", name: "Test", age: 25 })
+      () =>
+        command.runShape({ email: "test@example.com", name: "Test", age: 25 })
     ).toThrow("Deps should be provided before calling runShape");
 
     const result = await command
@@ -390,7 +398,7 @@ describe("Command API", () => {
     assert(resultShape.success);
     expect(resultShape.result).toMatchObject({
       id: expect.stringMatching(/^user-\d+$/),
-      email: "jane@example.com", 
+      email: "jane@example.com",
       name: "Jane Doe",
       age: 30,
       createdAt: expect.any(String),
