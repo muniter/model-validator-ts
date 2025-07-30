@@ -1,52 +1,46 @@
-import { test, expect, describe, assert } from "vitest";
+import { test, expect, describe, assert, expectTypeOf } from "vitest";
 import { z } from "zod";
 import { createValidator } from "./index.js";
 
-const userRepository = {
-  findUserByEmail: async (
-    email: string
-  ): Promise<{ id: string; email: string } | null> => {
-    // Simulate existing users
-    if (email === "existing@example.com") {
-      return { id: "user-123", email };
-    }
-    return null;
-  },
-  findUserById: async (
-    id: string
-  ): Promise<{ id: string; email: string } | null> => {
-    // Simulate existing users
-    if (id === "user-456") {
-      return { id, email: "newemail@example.com" };
-    }
-    return null;
-  },
-  isEmailBlacklisted: async (email: string): Promise<boolean> => {
-    // Simulate blacklisted domains/emails
-    const blacklistedDomains = ["spam.com", "blocked.net"];
-    const blacklistedEmails = ["admin@badactor.com"];
+describe("Schema Validation", () => {
+  test("schema validation works with basic types", async () => {
+    const schema = z.object({
+      name: z.string().min(3),
+      age: z.number().min(18),
+    });
 
-    if (blacklistedEmails.includes(email)) return true;
+    const validator = createValidator().input(schema);
 
-    const domain = email.split("@")[1];
-    if (!domain) return false;
-    return blacklistedDomains.includes(domain);
-  },
-  createUser: async (userData: {
-    email: string;
-    name: string;
-    age: number;
-  }) => {
-    return {
-      id: `user-${Date.now()}`,
-      ...userData,
-      createdAt: new Date().toISOString(),
-    };
-  },
-};
-type UserRepository = typeof userRepository;
+    // Test with invalid input (name too short)
+    const result1 = await validator.validate({
+      name: "ab",
+      age: 20,
+    });
+    assert(!result1.success);
+    expect(result1.errors.firstError("name")).toContain("3");
 
-describe("Basic Validator API", () => {
+    // Test with invalid input (age too low)
+    const result2 = await validator.validate({
+      name: "John",
+      age: 17,
+    });
+    assert(!result2.success);
+    expect(result2.errors.firstError("age")).toContain("18");
+
+    // Test with valid input
+    const result3 = await validator.validate({
+      name: "John",
+      age: 25,
+    });
+    assert(result3.success);
+    expect(result3.value).toEqual({
+      name: "John",
+      age: 25,
+    });
+  });
+});
+
+describe("Validator dependenceis", () => {
   const userRegistrationSchema = z.object({
     email: z.string().email(),
     name: z.string().min(2),
@@ -78,7 +72,9 @@ describe("Basic Validator API", () => {
 
   test("Validator with deps can only be called after providing deps", async () => {
     const validator = createValidator().input(userRegistrationSchema).$deps<{
-      userRepository: UserRepository;
+      fakeService: {
+        foo: string;
+      };
     }>();
 
     expect(validator["~unsafeInternals"]).toMatchObject({
@@ -101,7 +97,9 @@ describe("Basic Validator API", () => {
 
   test("Validator with deps can be called after providing deps", async () => {
     const validator = createValidator().input(userRegistrationSchema).$deps<{
-      userRepository: UserRepository;
+      fakeService: {
+        foo: string;
+      };
     }>();
 
     expect(validator["~unsafeInternals"]).toMatchObject({
@@ -110,7 +108,7 @@ describe("Basic Validator API", () => {
       depsStatus: "required",
     });
 
-    const deps = { userRepository };
+    const deps = { fakeService: { foo: "bar" } };
     const validatorWithDeps = validator.provide(deps);
 
     expect(validatorWithDeps["~unsafeInternals"]).toMatchObject({
@@ -131,7 +129,9 @@ describe("Basic Validator API", () => {
       age: 25,
     });
   });
+});
 
+describe("Performance", () => {
   test("should reuse the same instance when chaining methods", () => {
     const validator = createValidator();
     const withInput = validator.input(z.object({ test: z.string() }));
@@ -149,264 +149,255 @@ describe("Basic Validator API", () => {
   });
 });
 
-describe("Schema Validation", () => {
-  test("schema validation works with basic types", async () => {
+describe("Context Passing & Rule Chain", () => {
+  test("can pass context between rules", async () => {
     const schema = z.object({
-      name: z.string().min(3),
-      age: z.number().min(18),
+      hello: z.string().min(2),
+      name: z.string().min(2),
+      age: z.number(),
     });
 
-    const commandDefinition = createValidator()
+    const validator = createValidator()
       .input(schema)
-      .command({
-        execute: async (args) => {
-          return "ok";
+      .addRule({
+        fn: async (args) => {
+          return { context: { message: `Hello ${args.data.name}` } };
+        },
+      })
+      .addRule({
+        fn: async (args) => {
+          return {
+            context: {
+              message: `${args.context.message}. You are ${
+                args.data.age >= 18 ? "an adult" : "a minor"
+              }`,
+            },
+          };
+        },
+      })
+      .addRule({
+        fn: async (args) => {
+          return {
+            context: {
+              isAdult: args.data.age >= 18,
+            },
+          };
+        },
+      })
+      .addRule({
+        fn: async (args) => {
+          expect(args.context).toEqual({
+            message: "Hello John Doe. You are an adult",
+            isAdult: true,
+          });
         },
       });
 
-    // Test with invalid input (name too short) - should be validation step
-    const result1 = await commandDefinition.run({
-      name: "ab",
-      age: 20,
-    });
-    assert(!result1.success);
-    expect(result1.step).toBe("validation");
-    expect(result1.errors.firstError("name")).toContain("3");
-
-    // Test with invalid input (age too low) - should be validation step
-    const result2 = await commandDefinition.run({
-      name: "John",
-      age: 17,
-    });
-    assert(!result2.success);
-    expect(result2.step).toBe("validation");
-    expect(result2.errors.firstError("age")).toContain("18");
-
-    // Test with valid input
-    const result3 = await commandDefinition.run({
-      name: "John",
+    const result = await validator.validate({
+      hello: "Hello",
+      name: "John Doe",
       age: 25,
     });
-    assert(result3.success);
-    expect(result3.result).toEqual("ok");
-  });
-});
-
-describe("Context Passing & Rule Chain", () => {
-  test("can pass context between rules", async () => {
-    const updateEmailSchema = z.object({
-      userId: z.string(),
-      newEmail: z.string().email(),
-    });
-
-    const updateEmailValidatorDefinition = createValidator()
-      .input(updateEmailSchema)
-      .$deps<{
-        userRepository: UserRepository;
-      }>()
-      .addRule({
-        id: "user-exists-check",
-        description: "Check if user exists",
-        fn: async (args) => {
-          const user = await args.deps.userRepository.findUserById(
-            args.data.userId
-          );
-          if (!user) {
-            return args.bag.addError("userId", "User not found");
-          }
-          return {
-            context: {
-              user,
-            },
-          };
-        },
-      })
-      .addRule({
-        description: "Check if new email is already taken",
-        fn: async (args) => {
-          expect(args.context.user).toBeDefined();
-          const userByEmail = await args.deps.userRepository.findUserByEmail(
-            args.data.newEmail
-          );
-          if (userByEmail) {
-            if (userByEmail.id === args.data.userId) {
-              return args.bag.addError(
-                "newEmail",
-                "You are already using this email address"
-              );
-            } else {
-              return args.bag.addError("newEmail", "Email already taken");
-            }
-          }
-          return {
-            context: {
-              emailChecked: true,
-            },
-          };
-        },
-      })
-      .addRule({
-        id: "blacklist-check-context",
-        description: "Check if new email is blacklisted",
-        fn: async (args) => {
-          expect(args.context.user).toBeDefined();
-          expect(args.context.emailChecked).toBe(true);
-          const isBlacklisted =
-            await args.deps.userRepository.isEmailBlacklisted(
-              args.data.newEmail
-            );
-          if (isBlacklisted) {
-            return args.bag.addError("newEmail", "Email domain is not allowed");
-          }
-        },
-      })
-      .addRule({
-        description: "Superfluous rule to test context",
-        fn: async (args) => {
-          expect(args.context).toBeDefined();
-          expect(args.context).toMatchObject({
-            user: expect.objectContaining({
-              id: expect.any(String),
-              email: expect.any(String),
-            }),
-            emailChecked: true,
-          } as const);
-        },
-      })
-      .provide({ userRepository });
-
-    // Test successful case
-    const input = {
-      userId: "user-456",
-      newEmail: "newemail@example.com",
-    };
-    const result = await updateEmailValidatorDefinition.validate(input);
     assert(result.success);
-    expect(result.context).toMatchObject({
-      user: { id: "user-456", email: "newemail@example.com" },
-      emailChecked: true,
+    expect(result.context).toEqual({
+      message: "Hello John Doe. You are an adult",
+      isAdult: true,
     });
-    expect(result.value).toEqual(input);
-
-    // Test failure case to check rule tracking with blacklisted email
-    const failResult = await updateEmailValidatorDefinition.validate({
-      userId: "user-456",
-      // This will trigger blacklist rule
-      newEmail: "test@spam.com",
-    });
-    assert(!failResult.success);
-    expect(failResult.errors.firstError("newEmail")).toBe(
-      "Email domain is not allowed"
-    );
-    expect(failResult.rule).toMatchObject({
-      id: "blacklist-check-context",
-      description: "Check if new email is blacklisted",
-    });
-
-    const failNoExists = await updateEmailValidatorDefinition.validate({
-      userId: "user-789",
-      newEmail: "test@spam.com",
-    });
-    assert(!failNoExists.success);
-    expect(failNoExists.errors.firstError("userId")).toBe("User not found");
-    expect(failNoExists.rule?.id).toBe("user-exists-check");
   });
 });
 
 describe("Command API", () => {
-  const userRegistrationSchema = z.object({
-    email: z.string().email(),
-    name: z.string().min(2),
-    age: z.number().min(18),
+  const paymentSchema = z.object({
+    sourceAccount: z.string().min(2),
+    targetAccount: z.string().min(2),
+    amount: z.number().min(1),
   });
 
-  test("Command can only be called directly if no deps are required", async () => {
-    const validator = createValidator().input(userRegistrationSchema);
+  const paymentService = {
+    executeTransfer: async (
+      sourceAccount: string,
+      targetAccount: string,
+      amount: number
+    ) => {
+      if (sourceAccount === "blacklisted") {
+        throw new Error("Source account is blacklisted");
+      }
+      if (targetAccount === "blacklisted") {
+        throw new Error("Target account is blacklisted");
+      }
+      return { success: true, transactionId: "123" };
+    },
+    getAccountBalance: async (account: string) => {
+      if (account === "no-funds") {
+        return { balance: 0 };
+      }
+      return { balance: 1000 };
+    },
+  };
 
+  const validator = createValidator()
+    .input(paymentSchema)
+    .addRule({
+      fn: async (args) => {
+        const balance = await paymentService.getAccountBalance(
+          args.data.sourceAccount
+        );
+        if (balance.balance < args.data.amount) {
+          args.bag.addError("amount", "Insufficient funds");
+        }
+      },
+    });
+
+  test("Can validate and execute a command", async () => {
     expect(validator["~unsafeInternals"]).toMatchObject({
-      schema: userRegistrationSchema,
+      schema: paymentSchema,
       deps: undefined,
       depsStatus: "not-required",
     });
 
     const command = validator.command({
       execute: async (args) => {
-        return { userId: "user-123", ...args.data };
+        return await paymentService
+          .executeTransfer(
+            args.data.sourceAccount,
+            args.data.targetAccount,
+            args.data.amount
+          )
+          .catch((error) => {
+            args.bag.addError(
+              "global",
+              error instanceof Error ? error.message : "Unknown error"
+            );
+          });
       },
     });
 
     const result = await command.run({
-      email: "john@example.com",
-      name: "John Doe",
-      age: 25,
+      sourceAccount: "123",
+      targetAccount: "456",
+      amount: 100,
     });
     assert(result.success);
     expect(result.result).toEqual({
-      userId: "user-123",
-      email: "john@example.com",
-      name: "John Doe",
-      age: 25,
+      success: true,
+      transactionId: "123",
     });
+
+    const result2 = await command.run({
+      sourceAccount: "blacklisted",
+      targetAccount: "456",
+      amount: 100,
+    });
+    assert(!result2.success);
+    expect(result2.errors.firstError("global")).toBe(
+      "Source account is blacklisted"
+    );
   });
 
-  test("Command can be called after providing deps", async () => {
-    const validator = createValidator().input(userRegistrationSchema).$deps<{
-      userRepository: UserRepository;
-    }>();
+  test("Command deps tracks if they have been provided", async () => {
+    const command = createValidator()
+      .input(z.object({ name: z.string().min(1) }))
+      .$deps<{
+        fakeService: {
+          foo: string;
+          bar: string;
+        };
+      }>()
+      .command({
+        execute: async (args) => {
+          return {
+            data: args.data,
+            foo: args.deps.fakeService.foo,
+          };
+        },
+      });
 
-    expect(validator["~unsafeInternals"]).toMatchObject({
-      schema: userRegistrationSchema,
-      deps: undefined,
-      depsStatus: "required",
-    });
-
-    const command = validator.command({
-      execute: async (args) => {
-        return await args.deps.userRepository.createUser(args.data);
-      },
-    });
+    // Tracked at the type level
+    expectTypeOf(command.run).toBeNever();
+    expectTypeOf(command.runShape).toBeNever();
 
     // Without providing deps, the command should throw an error
     await expect(
-      // @ts-expect-error: run is not available at the type level when deps are required
-      command.run({ email: "john@example.com", name: "John Doe", age: 25 })
+      // @ts-expect-error: Method is still there, just should not be called
+      async () => command.run({ name: "John Doe" })
     ).rejects.toThrow("Deps should be provided before calling run");
 
     // runShape should also not be available without providing deps
-    expect(
-      // @ts-expect-error: runShape is not available at the type level when deps are required
-      () =>
-        command.runShape({ email: "test@example.com", name: "Test", age: 25 })
-    ).toThrow("Deps should be provided before calling runShape");
+    await expect(
+      // @ts-expect-error: Method is still there, just should not be called
+      async () => command.runShape({ name: "John Doe" })
+    ).rejects.toThrow("Deps should be provided before calling runShape");
 
-    const result = await command
-      .provide({ userRepository })
-      .run({ email: "john@example.com", name: "John Doe", age: 25 });
+    const commandWithDeps = command.provide({
+      fakeService: { foo: "bar", bar: "foo" },
+    });
+    expectTypeOf(commandWithDeps.run).not.toBeNever();
+    expectTypeOf(commandWithDeps.runShape).not.toBeNever();
+
+    const result = await commandWithDeps.run({ name: "John Doe" });
     assert(result.success);
     expect(result.result).toMatchObject({
-      id: expect.stringMatching(/^user-\d+$/),
-      email: "john@example.com",
-      name: "John Doe",
-      age: 25,
-      createdAt: expect.any(String),
+      data: { name: "John Doe" },
+      foo: "bar",
     });
 
-    // runShape should also work when deps are provided
-    const resultShape = await command
-      .provide({ userRepository })
-      .runShape({ email: "jane@example.com", name: "Jane Doe", age: 30 });
-    assert(resultShape.success);
-    expect(resultShape.result).toMatchObject({
-      id: expect.stringMatching(/^user-\d+$/),
-      email: "jane@example.com",
-      name: "Jane Doe",
-      age: 30,
-      createdAt: expect.any(String),
+    const result2 = await commandWithDeps.runShape({ name: "John Doe" });
+    assert(result2.success);
+    expect(result2.result).toMatchObject({
+      data: { name: "John Doe" },
+      foo: "bar",
     });
   });
 });
 
 describe("Real-world Validation Examples", () => {
+  const userRepository = {
+    users: [
+      { id: "user-123", email: "existing@example.com", createdAt: new Date() },
+      { id: "user-456", email: "newemail@example.com", createdAt: new Date() },
+    ],
+    blacklistedDomains: ["spam.com", "blocked.net"],
+    blacklistedEmails: ["admin@badactor.com"],
+
+    findUserByEmail: async (
+      email: string
+    ): Promise<{ id: string; email: string } | null> => {
+      return userRepository.users.find((user) => user.email === email) || null;
+    },
+
+    findUserById: async (
+      id: string
+    ): Promise<{ id: string; email: string } | null> => {
+      return userRepository.users.find((user) => user.id === id) || null;
+    },
+    isEmailBlacklisted: async (email: string): Promise<boolean> => {
+      if (userRepository.blacklistedEmails.includes(email)) return true;
+      const domain = email.split("@")[1];
+      if (!domain) return false;
+      return userRepository.blacklistedDomains.includes(domain);
+    },
+    changeEmail: async (userId: string, newEmail: string) => {
+      const user = await userRepository.findUserById(userId);
+      if (!user) throw new Error("User not found");
+      user.email = newEmail;
+      return user;
+    },
+    createUser: async (userData: {
+      email: string;
+      name: string;
+      age: number;
+    }): Promise<{ id: string; email: string; name: string; age: number }> => {
+      const newUser = {
+        id: `user-${userRepository.users.length + 1}`,
+        ...userData,
+        createdAt: new Date(),
+      };
+      userRepository.users.push(newUser);
+      return newUser;
+    },
+  };
+  type UserRepository = typeof userRepository;
+
   describe("User Registration", () => {
     const userRegistrationSchema = z.object({
       email: z.string().email(),
@@ -601,7 +592,7 @@ describe("Real-world Validation Examples", () => {
         email: "success@example.com",
         name: "John Doe",
         age: 25,
-        createdAt: expect.any(String),
+        createdAt: expect.any(Date),
       });
 
       // Test failed registration due to duplicate email
