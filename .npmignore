@@ -41,3 +41,6 @@ pnpm-debug.log*
 # Test coverage
 coverage/
 .vitest/ 
+
+# Examples
+*.example.ts
