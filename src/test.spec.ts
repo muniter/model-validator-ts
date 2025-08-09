@@ -264,8 +264,7 @@ describe("Command API", () => {
             args.data.amount
           )
           .catch((error) => {
-            args.bag.addError(
-              "global",
+            args.bag.addGlobalError(
               error instanceof Error ? error.message : "Unknown error"
             );
           });
@@ -289,7 +288,7 @@ describe("Command API", () => {
       amount: 100,
     });
     assert(!result2.success);
-    expect(result2.errors.firstError("global")).toBe(
+    expect(result2.errors.global).toBe(
       "Source account is blacklisted"
     );
   });
@@ -728,8 +727,7 @@ describe("Real-world Validation Examples", () => {
               return result;
             } catch (error) {
               // External service failed unexpectedly
-              return args.bag.addError(
-                "global",
+              return args.bag.addGlobalError(
                 `External service error: ${
                   error instanceof Error ? error.message : "Unknown error"
                 }`
@@ -806,7 +804,7 @@ describe("Real-world Validation Examples", () => {
 
       assert(!result4.success);
       expect(result4.step).toBe("execution");
-      expect(result4.errors.firstError("global")).toContain(
+      expect(result4.errors.global).toContain(
         "Failed in transfer"
       );
       expect(result4.rule).toBeUndefined();

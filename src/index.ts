@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from "./standard-schema.ts";
 
-type TValidationDeps = Record<string, unknown>;
+type TValidationDeps = object;
 
 function invariant<T>(condition: T, message: string): asserts condition {
   if (!condition) {
@@ -8,90 +8,50 @@ function invariant<T>(condition: T, message: string): asserts condition {
   }
 }
 
-type ErrorKeys<TInput> = TInput extends Record<
-  string | number | symbol,
-  unknown
->
-  ? keyof TInput | "global"
-  : "global";
+type ErrorBagFromInput<TInput> = ErrorBag<Exclude<keyof TInput, symbol | number>>;
+type ErrorBagFromSchema<TSchema extends StandardSchemaV1> = ErrorBag<Exclude<keyof StandardSchemaV1.InferOutput<TSchema>, symbol | number>>;
 
-export class ErrorBag<TInput> {
-  #issues: Array<{ key: ErrorKeys<TInput>; message: string }> = [];
+export class ErrorBag<TKeys extends string> {
+  #issues: Array<{ key: TKeys; message: string }> = [];
+  #global: string | undefined;
 
-  addError(key: ErrorKeys<TInput>, message: string): this {
+  addGlobalError(message: string): this {
+    this.#global = message;
+    return this;
+  }
+
+  addError(key: TKeys, message: string): this {
     this.#issues.push({ key, message });
     return this;
   }
 
-  firstError(key: ErrorKeys<TInput>): string | undefined {
+  get global(): string | undefined {
+    return this.#global;
+  }
+
+  firstError(key: TKeys): string | undefined {
     return this.#issues.find((issue) => issue.key === key)?.message;
   }
 
-  hasErrors() {
-    return this.#issues.length > 0;
+  hasErrors(): boolean {
+    return this.#issues.length > 0 || this.#global !== undefined;
   }
 
-  toFlattenObject(): Record<ErrorKeys<TInput>, string> {
-    const result: Record<ErrorKeys<TInput>, string> = {} as Record<
-      ErrorKeys<TInput>,
-      string
-    >;
+  toObject(): {
+    global: string | undefined;
+    issues: Partial<Record<TKeys, string[]>>;
+  } {
+    const issuesObj: Partial<Record<TKeys, string[]>> = {};
     for (const issue of this.#issues) {
-      result[issue.key] = issue.message;
-    }
-    return result;
-  }
-
-  get toObject() {
-    const result: Partial<Record<ErrorKeys<TInput>, string[]>> = {};
-    for (const issue of this.#issues) {
-      if (!result[issue.key]) {
-        result[issue.key] = [];
+      if (!issuesObj[issue.key]) {
+        issuesObj[issue.key] = [];
       }
-      result[issue.key]!.push(issue.message);
+      issuesObj[issue.key]!.push(issue.message);
     }
-    return result;
-  }
-
-  toString() {
-    return JSON.stringify(this.toObject);
-  }
-
-  toHtml() {
-    let result = "";
-    if (!this.hasErrors()) {
-      return result;
-    }
-    result += "<ul>";
-    for (const issue of this.#issues) {
-      let strKey: string;
-      if (typeof issue.key === "symbol" || typeof issue.key === "number") {
-        strKey = issue.key.toString();
-      } else {
-        strKey = issue.key;
-      }
-      result += `<li>${strKey}: ${issue.message}</li>`;
-    }
-    result += "</ul>";
-    return result;
-  }
-
-  toText(): string {
-    if (!this.hasErrors()) {
-      return "";
-    }
-    const result = [];
-    let currentKey: ErrorKeys<TInput> | null = null;
-
-    for (const issue of this.#issues) {
-      if (currentKey !== issue.key) {
-        currentKey = issue.key;
-        result.push(currentKey);
-      }
-      result.push(`- ${issue.message}`);
-    }
-
-    return result.join("\n");
+    return {
+      global: this.#global,
+      issues: issuesObj,
+    };
   }
 }
 
@@ -117,7 +77,7 @@ async function validate<
     }
   | {
       success: false;
-      errors: ErrorBag<StandardSchemaV1.InferOutput<TSchema>>;
+      errors: ErrorBagFromSchema<TSchema>;
       rule: { id?: string; description?: string } | undefined;
     }
 > {
@@ -131,18 +91,18 @@ async function validate<
     presult = await presult;
   }
 
-  const bag = new ErrorBag<any>();
+  const bag: ErrorBagFromSchema<TSchema> = new ErrorBag();
 
   if (presult.issues) {
     for (const issue of presult.issues) {
       if (typeof issue.message !== "string") {
         throw new Error("Unexpected error format, expected string");
       }
-      let path: ErrorKeys<any>;
+      let path: string;
       if (Array.isArray(issue.path)) {
-        path = issue.path.join(".") as ErrorKeys<any>;
+        path = issue.path.join(".") as string;
       } else if (typeof issue.path === "string") {
-        path = issue.path as ErrorKeys<any>;
+        path = issue.path;
       } else {
         throw new Error(
           `Unsupported issue path type ${typeof issue.path}: issue: ${JSON.stringify(
@@ -150,7 +110,7 @@ async function validate<
           )}`
         );
       }
-      bag.addError(path, issue.message);
+      bag.addError(path as any, issue.message);
     }
 
     return {
@@ -171,7 +131,11 @@ async function validate<
     });
 
     if (bag.hasErrors()) {
-      return { success: false, errors: bag, rule: { id: rule.id, description: rule.description } };
+      return {
+        success: false,
+        errors: bag,
+        rule: { id: rule.id, description: rule.description },
+      };
     }
 
     if (result && typeof result === "object") {
@@ -202,7 +166,7 @@ type ContextRuleFunction<
 > = (args: {
   data: TInput;
   deps: TDeps;
-  bag: ErrorBag<TInput>;
+  bag: ErrorBagFromInput<TInput>;
   context: TInputContext;
 }) => TReturn | Promise<TReturn> | void | Promise<void>;
 
@@ -225,7 +189,7 @@ export type CommandResult<TOutput, TInput, TContext> =
     }
   | {
       success: false;
-      errors: ErrorBag<TInput>;
+      errors: ErrorBagFromInput<TInput>;
       step: "validation" | "execution";
       rule?: { id?: string; description?: string };
     };
@@ -262,7 +226,7 @@ export class Command<
     data: StandardSchemaV1.InferOutput<TSchema>;
     deps: TDeps;
     context: TContext;
-    bag: ErrorBag<StandardSchemaV1.InferOutput<TSchema>>;
+    bag: ErrorBagFromSchema<TSchema>;
   }) => Promise<TOutput> | TOutput;
 
   constructor(
@@ -276,7 +240,7 @@ export class Command<
       data: StandardSchemaV1.InferOutput<TSchema>;
       deps: TDeps;
       context: TContext;
-      bag: ErrorBag<StandardSchemaV1.InferOutput<TSchema>>;
+      bag: ErrorBagFromSchema<TSchema>;
     }) => Promise<TOutput> | TOutput
   ) {
     this.#validatorBuilder = validatorBuilder;
@@ -325,7 +289,7 @@ export class Command<
     }
 
     // Create a new error bag for the command execution
-    const executionBag = new ErrorBag<StandardSchemaV1.InferOutput<TSchema>>();
+    const executionBag: ErrorBagFromSchema<TSchema> = new ErrorBag();
 
     const executeResult = await this.#execute({
       data: validation.value,
@@ -336,12 +300,22 @@ export class Command<
 
     // Check if errors were added to the bag during execution
     if (executionBag.hasErrors()) {
-      return { success: false, errors: executionBag, step: "execution", rule: undefined };
+      return {
+        success: false,
+        errors: executionBag,
+        step: "execution",
+        rule: undefined,
+      };
     }
 
     // Check if the execute function returned an ErrorBag
     if (executeResult instanceof ErrorBag) {
-      return { success: false, errors: executeResult, step: "execution", rule: undefined };
+      return {
+        success: false,
+        errors: executeResult,
+        step: "execution",
+        rule: undefined,
+      };
     }
 
     return {
@@ -363,12 +337,12 @@ export class Command<
     opts?: ValidationOpts<StandardSchemaV1.InferInput<TSchema>>
   ) => {
     const internals = this.#validatorBuilder["~unsafeInternals"];
-    
+
     invariant(
       internals.depsStatus !== "required",
       "Deps should be provided before calling runShape"
     );
-    
+
     return this.run(input, opts);
   }) as any;
 }
@@ -447,7 +421,7 @@ export class FluentValidatorBuilder<
           }
         | {
             success: false;
-            errors: ErrorBag<StandardSchemaV1.InferInput<TSchema>>;
+            errors: ErrorBagFromSchema<TSchema>;
             rule?: { id?: string; description?: string };
           }
       > = ((
@@ -511,7 +485,7 @@ export class FluentValidatorBuilder<
       data: StandardSchemaV1.InferOutput<TSchema>;
       deps: TDeps;
       context: TContext;
-      bag: ErrorBag<StandardSchemaV1.InferOutput<TSchema>>;
+      bag: ErrorBagFromSchema<TSchema>;
     }) => Promise<TOutput> | TOutput;
   }): Command<TSchema, TDeps, TContext, TOutput, TDpesStatus> {
     return new Command(this, args.execute);
@@ -521,3 +495,24 @@ export class FluentValidatorBuilder<
 export function buildValidator() {
   return new FluentValidatorBuilder();
 }
+
+export type InferCommandResult<
+  TCommand extends Command<any, any, any, any, any>,
+  TCondition extends "success" | "failure" | "all" = "all"
+> = TCommand extends Command<
+  infer TSchema,
+  any,
+  infer TContext,
+  infer TOutput,
+  any
+>
+  ? TCondition extends "success"
+    ? CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext> & {
+        success: true;
+      }
+    : TCondition extends "failure"
+    ? CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext> & {
+        success: false;
+      }
+    : CommandResult<TOutput, StandardSchemaV1.InferInput<TSchema>, TContext>
+  : never;
