@@ -472,7 +472,7 @@ export class FluentValidatorBuilder<
     });
   }) as any;
 
-  addRule<TReturn>(
+  rule<TReturn>(
     rule: ContextRuleDefinition<
       StandardSchemaV1.InferOutput<TSchema>,
       TDeps,
@@ -518,6 +518,6 @@ export class FluentValidatorBuilder<
   }
 }
 
-export function createValidator() {
+export function buildValidator() {
   return new FluentValidatorBuilder();
 }

@@ -44,10 +44,10 @@ This is a TypeScript library for model validation that provides a fluent API for
 
 1. **Fluent Builder Pattern**
    ```typescript
-   createValidator()
+   buildValidator()
      .input(schema)
      .$deps<DepsType>()
-     .addRule(rule)
+     .rule(rule)
      .provide(deps)
      .command({ execute })
    ```

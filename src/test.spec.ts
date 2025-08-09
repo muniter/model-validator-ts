@@ -1,6 +1,6 @@
 import { test, expect, describe, assert, expectTypeOf } from "vitest";
 import { z } from "zod";
-import { createValidator } from "./index.js";
+import { buildValidator } from "./index.js";
 
 describe("Schema Validation", () => {
   test("schema validation works with basic types", async () => {
@@ -9,7 +9,7 @@ describe("Schema Validation", () => {
       age: z.number().min(18),
     });
 
-    const validator = createValidator().input(schema);
+    const validator = buildValidator().input(schema);
 
     // Test with invalid input (name too short)
     const result1 = await validator.validate({
@@ -48,7 +48,7 @@ describe("Validator dependenceis", () => {
   });
 
   test("Validator with no deps can be called with validate", async () => {
-    const validator = createValidator().input(userRegistrationSchema);
+    const validator = buildValidator().input(userRegistrationSchema);
 
     expect(validator["~unsafeInternals"]).toMatchObject({
       contextRules: expect.any(Array),
@@ -71,7 +71,7 @@ describe("Validator dependenceis", () => {
   });
 
   test("Validator with deps can only be called after providing deps", async () => {
-    const validator = createValidator().input(userRegistrationSchema).$deps<{
+    const validator = buildValidator().input(userRegistrationSchema).$deps<{
       fakeService: {
         foo: string;
       };
@@ -96,7 +96,7 @@ describe("Validator dependenceis", () => {
   });
 
   test("Validator with deps can be called after providing deps", async () => {
-    const validator = createValidator().input(userRegistrationSchema).$deps<{
+    const validator = buildValidator().input(userRegistrationSchema).$deps<{
       fakeService: {
         foo: string;
       };
@@ -133,10 +133,10 @@ describe("Validator dependenceis", () => {
 
 describe("Performance", () => {
   test("should reuse the same instance when chaining methods", () => {
-    const validator = createValidator();
+    const validator = buildValidator();
     const withInput = validator.input(z.object({ test: z.string() }));
     const withDeps = withInput.$deps<{ service: string }>();
-    const withRule = withDeps.addRule({
+    const withRule = withDeps.rule({
       fn: () => {},
     });
     const withProvide = withDeps.provide({ service: "test" });
@@ -157,14 +157,14 @@ describe("Context Passing & Rule Chain", () => {
       age: z.number(),
     });
 
-    const validator = createValidator()
+    const validator = buildValidator()
       .input(schema)
-      .addRule({
+      .rule({
         fn: async (args) => {
           return { context: { message: `Hello ${args.data.name}` } };
         },
       })
-      .addRule({
+      .rule({
         fn: async (args) => {
           return {
             context: {
@@ -175,7 +175,7 @@ describe("Context Passing & Rule Chain", () => {
           };
         },
       })
-      .addRule({
+      .rule({
         fn: async (args) => {
           return {
             context: {
@@ -184,7 +184,7 @@ describe("Context Passing & Rule Chain", () => {
           };
         },
       })
-      .addRule({
+      .rule({
         fn: async (args) => {
           expect(args.context).toEqual({
             message: "Hello John Doe. You are an adult",
@@ -235,9 +235,9 @@ describe("Command API", () => {
     },
   };
 
-  const validator = createValidator()
+  const validator = buildValidator()
     .input(paymentSchema)
-    .addRule({
+    .rule({
       fn: async (args) => {
         const balance = await paymentService.getAccountBalance(
           args.data.sourceAccount
@@ -295,7 +295,7 @@ describe("Command API", () => {
   });
 
   test("Command deps tracks if they have been provided", async () => {
-    const command = createValidator()
+    const command = buildValidator()
       .input(z.object({ name: z.string().min(1) }))
       .$deps<{
         fakeService: {
@@ -406,10 +406,10 @@ describe("Real-world Validation Examples", () => {
     });
 
     test("should detect duplicate email during validation", async () => {
-      const userRegistrationValidator = createValidator()
+      const userRegistrationValidator = buildValidator()
         .input(userRegistrationSchema)
         .$deps<{ userRepository: UserRepository }>()
-        .addRule({
+        .rule({
           id: "duplicate-email-check",
           description: "Check for duplicate email",
           fn: async (args) => {
@@ -447,10 +447,10 @@ describe("Real-world Validation Examples", () => {
     });
 
     test("should detect blacklisted email during validation", async () => {
-      const userRegistrationValidator = createValidator()
+      const userRegistrationValidator = buildValidator()
         .input(userRegistrationSchema)
         .$deps<{ userRepository: UserRepository }>()
-        .addRule({
+        .rule({
           id: "blacklist-check",
           description: "Check for blacklisted email",
           fn: async (args) => {
@@ -503,10 +503,10 @@ describe("Real-world Validation Examples", () => {
     });
 
     test("should run all validation rules and combine errors", async () => {
-      const userRegistrationValidator = createValidator()
+      const userRegistrationValidator = buildValidator()
         .input(userRegistrationSchema)
         .$deps<{ userRepository: UserRepository }>()
-        .addRule({
+        .rule({
           description: "Check for duplicate email",
           fn: async (args) => {
             const existingUser = await args.deps.userRepository.findUserByEmail(
@@ -517,7 +517,7 @@ describe("Real-world Validation Examples", () => {
             }
           },
         })
-        .addRule({
+        .rule({
           description: "Check for blacklisted email",
           fn: async (args) => {
             const isBlacklisted =
@@ -543,10 +543,10 @@ describe("Real-world Validation Examples", () => {
     });
 
     test("user registration command with full validation", async () => {
-      const userRegistrationCommand = createValidator()
+      const userRegistrationCommand = buildValidator()
         .input(userRegistrationSchema)
         .$deps<{ userRepository: UserRepository }>()
-        .addRule({
+        .rule({
           id: "command-duplicate-check",
           description: "Check for duplicate email",
           fn: async (args) => {
@@ -558,7 +558,7 @@ describe("Real-world Validation Examples", () => {
             }
           },
         })
-        .addRule({
+        .rule({
           id: "command-blacklist-check",
           description: "Check for blacklisted email",
           fn: async (args) => {
@@ -666,10 +666,10 @@ describe("Real-world Validation Examples", () => {
         },
       };
 
-      const transferCommand = createValidator()
+      const transferCommand = buildValidator()
         .input(transferMoneySchema)
         .$deps<{ externalBankService: typeof externalBankService }>()
-        .addRule({
+        .rule({
           id: "no-self-transfer",
           description: "Validate no transfer to same account",
           fn: async (args) => {
@@ -679,7 +679,7 @@ describe("Real-world Validation Examples", () => {
             }
           },
         })
-        .addRule({
+        .rule({
           id: "account-status-check",
           description: "Validate account status",
           fn: async (args) => {
@@ -702,7 +702,7 @@ describe("Real-world Validation Examples", () => {
               });
           },
         })
-        .addRule({
+        .rule({
           id: "balance-check",
           description: "Check if from account has sufficient balance",
           fn: async (args) => {

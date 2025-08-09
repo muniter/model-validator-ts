@@ -30,7 +30,7 @@ pnpm add model-validator-ts
 ### Basic Validation
 
 ```typescript
-import { createValidator } from 'model-validator-ts';
+import { buildValidator } from 'model-validator-ts';
 import { z } from 'zod';
 
 const userSchema = z.object({
@@ -40,7 +40,7 @@ const userSchema = z.object({
 });
 
 // Simple validation without dependencies
-const validator = createValidator().input(userSchema);
+const validator = buildValidator().input(userSchema);
 
 const result = await validator.validate({
   name: "John",
@@ -63,10 +63,10 @@ interface UserRepository {
   findByEmail(email: string): Promise<{ id: string } | null>;
 }
 
-const userValidator = createValidator()
+const userValidator = buildValidator()
   .input(userSchema)
   .$deps<{ userRepo: UserRepository }>()
-  .addRule({
+  .rule({
     fn: async ({ data, deps, bag }) => {
       // Check if email is already taken
       const existingUser = await deps.userRepo.findByEmail(data.email);
@@ -83,13 +83,13 @@ const result = await userValidator.validate(userData);
 ### Context Passing Between Rules
 
 ```typescript
-const layerValidator = createValidator()
+const layerValidator = buildValidator()
   .input(z.object({
     layerId: z.string(),
     visibility: z.enum(["public", "private"])
   }))
   .$deps<{ layerRepo: LayerRepository }>()
-  .addRule({
+  .rule({
     fn: async ({ data, deps, bag }) => {
       const layer = await deps.layerRepo.getLayer(data.layerId);
       if (!layer) {
@@ -100,7 +100,7 @@ const layerValidator = createValidator()
       return { context: { layer } };
     }
   })
-  .addRule({
+  .rule({
     fn: async ({ data, context, bag }) => {
       // Access context from previous rule
       if (context.layer.classification === "confidential" && 
@@ -116,14 +116,14 @@ const layerValidator = createValidator()
 ### Command Pattern for Validation + Execution
 
 ```typescript
-const transferMoneyCommand = createValidator()
+const transferMoneyCommand = buildValidator()
   .input(z.object({
     fromAccount: z.string(),
     toAccount: z.string(),
     amount: z.number().positive()
   }))
   .$deps<{ db: DatabaseService }>()
-  .addRule({
+  .rule({
     fn: async ({ data, bag }) => {
       // Business rule validation
       if (data.fromAccount === data.toAccount) {
@@ -181,7 +181,7 @@ Define the input schema using any Standard Schema compatible library.
 #### `.$deps<T>()`
 Declare the required dependencies type. Must be called before `.provide()`.
 
-#### `.addRule({ fn })`
+#### `.rule({ fn })`
 Add a business rule function. Rules can:
 - Add errors to the error bag
 - Return context: `{ context: { key: value } }`
@@ -256,10 +256,10 @@ if (!result.success) {
 
 ```typescript
 // TypeScript will enforce these relationships:
-const validator = createValidator()
+const validator = buildValidator()
   .input(schema)           // Infers input/output types
   .$deps<{ service: T }>() // Requires provide() before validate()
-  .addRule({ ... })        // Rule receives typed data, deps, context
+  .rule({ ... })        // Rule receives typed data, deps, context
   .provide(dependencies);  // Type-checked against $deps<T>
 
 // result.value is typed according to schema output
