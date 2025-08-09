@@ -32,7 +32,7 @@ export type ProductType =
 export type FulfillmentType = "internal" | "third-party";
 export type RequestSource = "customer-portal" | "admin-panel" | "api";
 
-interface User {
+export interface User {
   id: string;
   role: "customer" | "admin";
 }
@@ -98,6 +98,15 @@ export interface NotificationService {
   ): Promise<{ sent: boolean; timestamp: Date }>;
 }
 
+export interface CancellationDependencies {
+    orderService: OrderService;
+    productCatalog: ProductCatalog;
+    discountService: DiscountService;
+    shippingService: ShippingService;
+    notificationService: NotificationService;
+    user: User;
+  }
+
 // Request Schema
 export const orderCancellationSchema = z.object({
   orderId: z.string().min(1, "Order ID is required"),
@@ -114,14 +123,7 @@ export type OrderCancellationRequest = z.infer<typeof orderCancellationSchema>;
 // Business Logic Validation
 export const orderCancellationValidator = buildValidator()
   .input(orderCancellationSchema)
-  .$deps<{
-    orderService: OrderService;
-    productCatalog: ProductCatalog;
-    discountService: DiscountService;
-    shippingService: ShippingService;
-    notificationService: NotificationService;
-    user: User;
-  }>()
+  .$deps<CancellationDependencies>()
   .rule({
     id: "order-exists",
     description: "Check if order exists and belongs to customer",
