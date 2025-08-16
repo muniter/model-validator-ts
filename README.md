@@ -14,6 +14,7 @@ This library is an attempt to provide a simple and opinionated way to do all of 
 
 ```typescript
 import { buildValidator } from "model-validator-ts";
+import { z } from "zod";
 
 const loginCommand = buildValidator()
   // Your usual zod schema
@@ -71,6 +72,35 @@ if (!result.success) {
   // { user: { id: string, email: string }, token: string }
   console.log(result.result);
 }
+
+// Now use in your http handler
+app.post("/login", async (req, res) => {
+  const result = await loginCommand.run(req.body);
+  if (!result.success) {
+    return res.status(400).json({
+      success: false,
+      errors: result.errors.toObject(),
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    result: result.result,
+  });
+});
+
+// Or if using something like trpc
+const loginProcedure = publicProcedure
+  .input(loginCommand.inputSchema)
+  .mutation(async ({ input }) => {
+    const result = await loginCommand.run(input);
+    if (!result.success) {
+      throw new trpc.TRPCError({
+        code: "BAD_REQUEST",
+        message: result.errors.toObject(),
+      });
+    }
+    return result.result;
+  });
 ```
 
 For a more complex real-world example with multiple dependencies and rules, check out the [order cancellation example](https://github.com/muniter/model-validator-ts/blob/main/src/order-cancellation.example.ts).
@@ -95,168 +125,12 @@ yarn add model-validator-ts
 pnpm add model-validator-ts
 ```
 
-## Quick Start
+## Examples
 
-### Basic Validation
+If you want more complex examples, here are a few:
 
-```typescript
-import { buildValidator } from "model-validator-ts";
-import { z } from "zod";
-
-const userSchema = z.object({
-  name: z.string().min(3),
-  age: z.number().min(18),
-  email: z.string().email(),
-});
-
-// Simple validation without dependencies
-const validator = buildValidator().input(userSchema).rule({
-  fn: async ({ data, bag }) => {
-    if (await isUserBlacklisted(data.email)) {
-      return bag.addError("email", "User is blacklisted");
-    }
-  },
-});
-
-const result = await validator.validate({
-  name: "John",
-  age: 25,
-  email: "john@example.com",
-});
-
-if (result.success) {
-  console.log("Valid user:", result.value);
-  console.log("Context:", result.context);
-} else {
-  console.log("Typed Validation errors to use in your UI:", result.errors.toObject());
-}
-```
-
-### User Login Example
-
-A complete example showing schema validation, business rules, context passing, and command execution:
-
-```typescript
-import { z } from "zod";
-import { buildValidator } from "model-validator-ts";
-
-interface User {
-  id: string;
-  role: "admin" | "customer";
-  email: string;
-  passwordHash: string;
-}
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-});
-
-const loginCommand = buildValidator()
-  .input(loginSchema)
-  .rule({
-    fn: async ({ data, bag }) => {
-      // Data is fully typed from the schema
-      const user = await userService.findByEmail(data.email);
-      if (!user) {
-        return bag.addGlobalError("Invalid email or password");
-      }
-      if (!(await userService.validatePassword(user, data.password))) {
-        return bag.addGlobalError("Invalid email or password");
-      }
-      // Pass user to next rules via context
-      return { context: { user } };
-    },
-  })
-  .rule({
-    fn: async ({ data, bag, context }) => {
-      // Access context from previous rule
-      if (context.user.role === "admin") {
-        return bag.addError("email", "Admin users cannot login with password");
-      }
-    },
-  })
-  .command({
-    execute: async ({ context, bag }) => {
-      // Execute the business logic
-      const { user } = context;
-      return {
-        user,
-        token: await userService.generateToken(user),
-      };
-    },
-  });
-
-// Usage in an endpoint
-app.post("/login", async (req, res) => {
-  const result = await loginCommand.run(req.body);
-  if (!result.success) {
-    return res.status(400).json({
-      success: false,
-      errors: result.errors.toObject(),
-    });
-  }
-  return res.status(200).json({
-    success: true,
-    result: result.result,
-  });
-});
-```
-
-### Money Transfer with External Services
-
-A more complex example showing dependency injection and errors happening on command execution and rules.
-
-```typescript
-const transferMoneySchema = z.object({
-  fromAccount: z.string(),
-  toAccount: z.string(),
-  amount: z.number().positive(),
-});
-
-const transferCommand = buildValidator()
-  .input(transferMoneySchema)
-  .$deps<{ externalBankService: BankService }>()
-  .rule({
-    id: "no-self-transfer",
-    fn: async ({ data, bag }) => {
-      if (data.fromAccount === data.toAccount) {
-        bag.addError("toAccount", "Cannot transfer to same account");
-      }
-    },
-  })
-  .rule({
-    id: "balance-check",
-    fn: async ({ data, deps, bag }) => {
-      const balance = await deps.externalBankService.checkAccountBalance(
-        data.fromAccount
-      );
-      if (balance < data.amount) {
-        bag.addError("amount", "Insufficient funds");
-      }
-    },
-  })
-  .command({
-    execute: async ({ data, deps, bag }) => {
-      try {
-        const result = await deps.externalBankService.executeTransfer(
-          data.fromAccount,
-          data.toAccount,
-          data.amount
-        );
-        return result;
-      } catch (error) {
-        // Handle runtime errors, or things that just can't be validated before execution
-        return bag.addGlobalError(`External service error: ${error.message}`);
-      }
-    },
-  });
-
-// Execute with dependencies
-const result = await transferCommand
-  .provide({ externalBankService })
-  .run({ fromAccount: "acc-123", toAccount: "acc-456", amount: 100 });
-```
+- [Order Cancellation Example](https://github.com/muniter/model-validator-ts/blob/main/src/order-cancellation.example.ts) - Complex e-commerce validation scenario that evaluate tons of rules neccessary for cancelling an order.
+- [User Login Example](https://github.com/muniter/model-validator-ts/blob/main/src/login.example.ts) - Login into an application that has a few special rules.
 
 ## API Reference
 

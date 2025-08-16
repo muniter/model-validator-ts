@@ -15,97 +15,12 @@
  */
 
 import { z } from "zod";
-import { buildValidator, type InferCommandResult } from "./index.js";
+import { buildValidator } from "./index.js";
 
-// Domain Types
-export type OrderStatus =
-  | "pending"
-  | "processing"
-  | "shipped"
-  | "delivered"
-  | "cancelled";
-export type ProductType =
-  | "physical"
-  | "digital"
-  | "personalized"
-  | "downloadable";
-export type FulfillmentType = "internal" | "third-party";
-export type RequestSource = "customer-portal" | "admin-panel" | "api";
-
-export interface User {
-  id: string;
-  role: "customer" | "admin";
-}
-
-export interface OrderItem {
-  id: string;
-  productId: string;
-  productType: ProductType;
-  quantity: number;
-  price: number;
-}
-
-export interface Order {
-  id: string;
-  customerId: string;
-  status: OrderStatus;
-  items: OrderItem[];
-  totalAmount: number;
-  discountCode?: string;
-  fulfillmentType: FulfillmentType;
-  createdAt: Date;
-  shippingId: string;
-}
-
-export interface Product {
-  id: string;
-  name: string;
-  type: ProductType;
-  isCancellable: boolean;
-}
-
-export interface ShippingStatus {
-  shippingId: string;
-  isShipped: boolean;
-  plannedShippingDate?: Date;
-  trackingNumber?: string;
-  carrier?: string;
-}
-
-// Service Interfaces
-export interface OrderService {
-  findById(orderId: string): Promise<Order | null>;
-  cancelOrder(orderId: string, reason: string): Promise<Order>;
-}
-
-export interface ProductCatalog {
-  findById(productId: string): Promise<Product | null>;
-}
-
-export interface DiscountService {
-  isSpecialDiscount(code: string): Promise<boolean>;
-}
-
-export interface ShippingService {
-  getShippingStatus(shippingId: string): Promise<ShippingStatus>;
-}
-
-export interface NotificationService {
-  notifyCancellation(
-    orderId: string,
-    customerId: string,
-    reason: string
-  ): Promise<{ sent: boolean; timestamp: Date }>;
-}
-
-export interface CancellationDependencies {
-    orderService: OrderService;
-    productCatalog: ProductCatalog;
-    discountService: DiscountService;
-    shippingService: ShippingService;
-    notificationService: NotificationService;
-    user: User;
-  }
+// At the end of the file you can find the types of Order, Product, etc.
+// And also the methods of each of this services, this is moved to the
+// end of the file to make the example more readable. In a real app
+// this would be defined acrosss your entire application.
 
 // Request Schema
 export const orderCancellationSchema = z.object({
@@ -339,4 +254,96 @@ export async function exampleUsage(dependencies: CancellationDependencies) {
       error: result.errors.toObject(),
     };
   }
+}
+
+// First we define the types of our system.
+export type OrderStatus =
+  | "pending"
+  | "processing"
+  | "shipped"
+  | "delivered"
+  | "cancelled";
+export type ProductType =
+  | "physical"
+  | "digital"
+  | "personalized"
+  | "downloadable";
+export type FulfillmentType = "internal" | "third-party";
+export type RequestSource = "customer-portal" | "admin-panel" | "api";
+
+export interface User {
+  id: string;
+  role: "customer" | "admin";
+}
+
+export interface OrderItem {
+  id: string;
+  productId: string;
+  productType: ProductType;
+  quantity: number;
+  price: number;
+}
+
+export interface Order {
+  id: string;
+  customerId: string;
+  status: OrderStatus;
+  items: OrderItem[];
+  totalAmount: number;
+  discountCode?: string;
+  fulfillmentType: FulfillmentType;
+  createdAt: Date;
+  shippingId: string;
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  type: ProductType;
+  isCancellable: boolean;
+}
+
+export interface ShippingStatus {
+  shippingId: string;
+  isShipped: boolean;
+  plannedShippingDate?: Date;
+  trackingNumber?: string;
+  carrier?: string;
+}
+
+// Then we define imaginary services that we will use to validate the order.
+export interface OrderService {
+  findById(orderId: string): Promise<Order | null>;
+  cancelOrder(orderId: string, reason: string): Promise<Order>;
+}
+
+export interface ProductCatalog {
+  findById(productId: string): Promise<Product | null>;
+}
+
+export interface DiscountService {
+  isSpecialDiscount(code: string): Promise<boolean>;
+}
+
+export interface ShippingService {
+  getShippingStatus(shippingId: string): Promise<ShippingStatus>;
+}
+
+export interface NotificationService {
+  notifyCancellation(
+    orderId: string,
+    customerId: string,
+    reason: string
+  ): Promise<{ sent: boolean; timestamp: Date }>;
+}
+
+// Dependencies the command will need to validate everything and
+// then cancel the order.
+export interface CancellationDependencies {
+  orderService: OrderService;
+  productCatalog: ProductCatalog;
+  discountService: DiscountService;
+  shippingService: ShippingService;
+  notificationService: NotificationService;
+  user: User;
 }

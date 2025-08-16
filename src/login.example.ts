@@ -1,16 +1,6 @@
 import { buildValidator } from "./index.js";
 import { z } from "zod";
 
-declare const app: {
-  post(
-    path: string,
-    handler: (
-      req: { body: unknown },
-      res: { status: (code: number) => { json: (data: unknown) => void } }
-    ) => unknown | Promise<unknown>
-  ): void;
-};
-
 interface User {
   id: string;
   role: "admin" | "customer";
@@ -86,3 +76,14 @@ app.post("/login", async (req, res) => {
     result: result.result,
   });
 });
+
+// Just to make typescript happy
+declare const app: {
+  post(
+    path: string,
+    handler: (
+      req: { body: unknown },
+      res: { status: (code: number) => { json: (data: unknown) => void } }
+    ) => unknown | Promise<unknown>
+  ): void;
+};
