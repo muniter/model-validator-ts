@@ -103,7 +103,7 @@ const loginProcedure = publicProcedure
   });
 ```
 
-For a more complex real-world example with multiple dependencies and rules, check out the [order cancellation example](https://github.com/muniter/model-validator-ts/blob/main/src/order-cancellation.example.ts).
+For a more complex real-world example with multiple dependencies and rules, check out the [order cancellation example](https://github.com/muniter/model-validator-ts/blob/main/src/order-cancellation.example.ts) or try it live in the [StackBlitz playground](https://stackblitz.com/edit/model-validator-ts-examples?file=order-cancellation.example.ts).
 
 ## Why this library helps with
 
@@ -126,6 +126,12 @@ pnpm add model-validator-ts
 ```
 
 ## Examples
+
+### 🚀 Interactive Playground
+
+Try out the examples directly in your browser with our [StackBlitz playground](https://stackblitz.com/edit/model-validator-ts-examples?file=order-cancellation.example.ts) - no installation needed!
+
+### More Examples
 
 If you want more complex examples, here are a few:
 
