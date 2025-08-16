@@ -4,7 +4,7 @@
 
 **Bridging the gap between simple shape validation and business logic**
 
-A type-safe validation library for TypeScript that provides a fluent API for creating validators and commands with business rules clear error messages and dependency injection. Built on top of the [Standard Schema](https://standardschema.dev/) specification, supports [zod](https://zod.dev/), [valibot](https://valibot.dev/), [ArkType](https://arktype.dev/), etc.
+A type-safe validation library for TypeScript that provides a fluent API for creating validators and commands with business rules, clear error messages and more. Built on top of the [Standard Schema](https://standardschema.dev/) specification, supports [zod](https://zod.dev/), [valibot](https://valibot.dev/), [ArkType](https://arktype.dev/), etc.
 
 ## The Problem
 
@@ -13,6 +13,8 @@ Shape validation with libraries like Zod works great for basic cases. But what h
 This library is an attempt to provide a simple and opinionated way to do all of this in a simple way taking advantage of TypeScript's type system to propagate the types through the validation pipeline.
 
 ```typescript
+import { buildValidator } from "model-validator-ts";
+
 const loginCommand = buildValidator()
   // Your usual zod schema
   .input(
@@ -71,7 +73,7 @@ if (!result.success) {
 }
 ```
 
-For a more complex real-world example with multiple dependencies and rules, check out the [order cancellation example](https://github.com/model-validator-ts/model-validator-ts/blob/main/src/order-cancellation.example.ts).
+For a more complex real-world example with multiple dependencies and rules, check out the [order cancellation example](https://github.com/muniter/model-validator-ts/blob/main/src/order-cancellation.example.ts).
 
 ## Why this library helps with
 
@@ -266,7 +268,7 @@ Define the input schema using any Standard Schema compatible library.
 
 #### `.$deps<T>()`
 
-Declare the required dependencies type. Must be called before `.provide()`.
+Declare the required dependencies type, forces you to provide dependencies before validation.
 
 #### `.rule({ fn, id?, description? })`
 
@@ -361,9 +363,9 @@ if (!result.success) {
 
 Check out these complete examples in the repository:
 
-- [Order Cancellation Example](https://github.com/model-validator-ts/model-validator-ts/blob/main/src/order-cancellation.example.ts) - Complex e-commerce validation scenario
-- [User Login Example](https://github.com/model-validator-ts/model-validator-ts/blob/main/src/login.example.ts) - Authentication with role-based rules
-- [Test Suite](https://github.com/model-validator-ts/model-validator-ts/blob/main/src/test.spec.ts) - Comprehensive examples of all features
+- [Order Cancellation Example](https://github.com/muniter/model-validator-ts/blob/main/src/order-cancellation.example.ts) - Complex e-commerce validation scenario
+- [User Login Example](https://github.com/muniter/model-validator-ts/blob/main/src/login.example.ts) - Authentication with role-based rules
+- [Test Suite](https://github.com/muniter/model-validator-ts/blob/main/src/test.spec.ts) - Comprehensive examples of all features
 
 ---
 
