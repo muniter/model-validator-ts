@@ -8,12 +8,6 @@ interface User {
   passwordHash: string;
 }
 
-declare const userService: {
-  findByEmail(email: string): Promise<User | null>;
-  validatePassword(user: User, password: string): Promise<boolean>;
-  generateToken(user: User): Promise<string>;
-};
-
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
@@ -86,4 +80,10 @@ declare const app: {
       res: { status: (code: number) => { json: (data: unknown) => void } }
     ) => unknown | Promise<unknown>
   ): void;
+};
+
+declare const userService: {
+  findByEmail(email: string): Promise<User | null>;
+  validatePassword(user: User, password: string): Promise<boolean>;
+  generateToken(user: User): Promise<string>;
 };
